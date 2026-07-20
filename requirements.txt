@@ -1,0 +1,9 @@
+numpy>=1.24
+pandas>=2.0
+scipy>=1.10
+matplotlib>=3.6
+
+# Optional. The code runs without these and falls back automatically.
+# opencv-python   # faster perspective transform (a NumPy DLT fallback is used if absent)
+# statsmodels     # Lilliefors normality test (a KS fallback is used if absent)
+# tables          # only needed to read DeepLabCut .h5 files (.csv needs nothing extra)
