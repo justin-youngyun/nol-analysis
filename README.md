@@ -1,12 +1,10 @@
 # Novel object location analysis
 
 Turns DeepLabCut pose tracking into a discrimination index and a set of exploration and
-locomotion measures for the novel object location (NOL) task — one clean per-animal table
-per cohort, the thing I actually check and plot once tracking is done.
+locomotion measures for the novel object location (NOL) task — one per-animal table
+per cohort.
 
-One thing to change before you read anything into the output: the arena size, the
-pixels-per-centimetre scale, and the frame rate baked into the code are set to my rig.
-Swap in yours first.
+Edit arena size, pixels-per-centimeter, and frame rate based on your setup prior to running code. 
 
 ## What it measures
 
@@ -29,14 +27,7 @@ There are also a handful of alternative learning readouts (time-binned DI, cumul
 a bout-count DI, an occupancy DI, and which object got approached first), because the
 single end-of-session number can hide the shape of the learning.
 
-A DI has to clear exclusion rules before I trust it: a minimum total interaction time and a
-minimum number of separate bouts at each object. Low explorers, and animals whose corners
-weren't detected, get flagged. At the cohort level it reports the mean DI and a one-sample
-test against chance, which is zero. No group comparison is hard-coded — every file under
-the input folder is treated as one cohort, and the genotype or treatment contrasts are
-yours to layer on top.
-
-## What it expects
+## Input Data
 
 DeepLabCut exports, `.csv` or `.h5`, with:
 
