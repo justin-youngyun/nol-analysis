@@ -1,82 +1,87 @@
-# NOL analysis
+# Novel object location analysis
 
-This is my analysis code for the novel object location (NOL) task. It reads pose tracking from DeepLabCut and computes a discrimination index along with a set of exploration and locomotion measures for each animal. I wrote it to turn raw tracked coordinates into one clean table per cohort that I can check and plot.
+Turns DeepLabCut pose tracking into a discrimination index and a set of exploration and
+locomotion measures for the novel object location (NOL) task — one clean per-animal table
+per cohort, the thing I actually check and plot once tracking is done.
 
-The arena size, the pixel to centimetre scale, and the frame rate in the code are set to my own recording setup, so replace them with yours before you read anything into the output.
+One thing to change before you read anything into the output: the arena size, the
+pixels-per-centimetre scale, and the frame rate baked into the code are set to my rig.
+Swap in yours first.
 
-## What it computes
+## What it measures
 
-For each animal I do the following.
+Per animal:
 
-- I correct camera distortion with a projective homography fit from the four arena corners A, B, C, and D, so pixel coordinates become centimetres in the arena frame.
-- I take the body centroid as the average of Neck, Back1, Back2, and Back3, ignoring any body point that DeepLabCut marked with low likelihood.
-- I count an animal as investigating an object when its nose is within a small radius of the object edge and its head is pointed at the object. The head angle is the angle between the neck-to-nose vector and the nose-to-object vector.
-- I compute the discrimination index as the novel-object time minus the familiar-object time, divided by the total object time. Object B is the novel location and object A is the familiar one.
-- I measure thigmotaxis as wall time divided by wall time plus centre time, with object time removed from that denominator so wall preference is not confounded by object investigation.
-- I measure locomotion as the summed frame-to-frame displacement of the centroid, with short tracking gaps filled by interpolation, and I flag immobile frames that fall below a speed threshold.
-- I also compute a few alternative learning readouts, such as time-binned DI, cumulative DI, a bout-count DI, an occupancy DI, and which object was approached first.
+- **Distortion correction**: a projective homography fit from the four arena corners
+  (A, B, C, D) maps pixel coordinates to centimetres in the arena frame.
+- **Centroid**: the mean of Neck, Back1, Back2, and Back3, ignoring any point DeepLabCut
+  flagged low-likelihood.
+- **Investigation**: counted when the nose is within a small radius of an object edge
+  *and* the head points at it (the angle between the neck→nose and nose→object vectors).
+- **Discrimination index**: novel-object time minus familiar-object time, over total
+  object time. Object B is the novel location, object A the familiar one.
+- **Thigmotaxis**: wall time over wall-plus-centre time, with object time pulled out of
+  the denominator so wall preference isn't confounded by investigation.
+- **Locomotion**: summed frame-to-frame centroid displacement, short tracking gaps
+  interpolated, frames below a speed threshold flagged immobile.
 
-I apply exclusion rules before I trust a discrimination index. An animal needs a minimum total object-interaction time and a minimum number of separate bouts at each object. I also flag low explorers and any animal whose arena corners were not detected.
+There are also a handful of alternative learning readouts (time-binned DI, cumulative DI,
+a bout-count DI, an occupancy DI, and which object got approached first), because the
+single end-of-session number can hide the shape of the learning.
 
-At the cohort level I report the mean discrimination index and a one-sample test against chance, which is zero. I do not hard-code any group comparison. The tool treats every file it finds under the input folder as one cohort.
+A DI has to clear exclusion rules before I trust it: a minimum total interaction time and a
+minimum number of separate bouts at each object. Low explorers, and animals whose corners
+weren't detected, get flagged. At the cohort level it reports the mean DI and a one-sample
+test against chance, which is zero. No group comparison is hard-coded — every file under
+the input folder is treated as one cohort, and the genotype or treatment contrasts are
+yours to layer on top.
 
-## Inputs
+## What it expects
 
-The analysis reads DeepLabCut exports in .csv or .h5 form. It expects these tracked points.
+DeepLabCut exports, `.csv` or `.h5`, with:
 
-- body points Nose, Neck, Back1, Back2, Back3, and Tailbase
-- object points ObjA_S for the familiar location and ObjB_Novel for the novel location
-- corner points A, B, C, and D
+- body points Nose, Neck, Back1, Back2, Back3, Tailbase
+- object points ObjA_S (familiar) and ObjB_Novel (novel)
+- corners A, B, C, D
 
-When both a raw and a filtered export exist for the same recording, the filtered one is used.
+If both a raw and a filtered export exist for a recording, it uses the filtered one.
 
-## How to run
-
-First install the requirements.
+## Running it
 
 ```
 pip install -r requirements.txt
 ```
 
-The repository ships with a synthetic data generator so you can run the whole pipeline without any real recordings. It writes fake DeepLabCut tables for a handful of animals, each wandering the arena and making scripted visits to the two object locations.
+`generate_synthetic_data.py` writes DeepLabCut-shaped tables (a few animals wandering the
+arena with scripted visits to the two locations), so the pipeline runs with no real
+recordings on hand:
 
 ```
 python3 generate_synthetic_data.py --output-dir synthetic_data --n-animals 8 --duration-sec 300 --frame-rate 30 --seed 7
-```
-
-Then run the analysis over that folder. I pass a frame rate and a full time window that match the synthetic session.
-
-```
 python3 nol_analysis.py --input-dir synthetic_data --output-dir outputs --frame-rate 30 --time-window-sec 0,300
 ```
 
-For a real recording I run it with my rig frame rate and the scoring window I use for the task, for example a window that starts a couple of minutes into the trial and runs to the end. Every threshold is a command line flag, so run the script with --help to see the full list and the defaults.
+On a real recording I pass my rig frame rate and the scoring window I use for the task —
+usually starting a couple of minutes in and running to the end. Every threshold is a flag;
+`--help` lists them all with defaults.
 
-You can also redraw the summary figure on its own from a saved table.
+Redraw the summary figure from a saved table without re-running the analysis:
 
 ```
 python3 make_nol_figures.py --input outputs --output outputs/summary.png
 ```
 
-## Outputs
+## What comes out
 
-Each run writes a few files into the output folder.
-
-- a per-animal table with the discrimination index, the exploration measures, and the alternative metrics
-- a per-bout table with one row per investigation bout
-- a summary json with the run parameters and the cohort-level numbers
-- a summary figure with the discrimination index per animal and its relationship to wall time and distance
+- a per-animal table: DI, the exploration measures, the alternative metrics
+- a per-bout table, one row per investigation bout
+- a summary JSON with the run parameters and the cohort numbers
+- a summary figure: DI per animal, against wall time and distance
 
 ## Files
 
-- `nol_analysis.py` is the core module and the command line entry point for the analysis.
-- `make_nol_figures.py` draws the summary figure from a per-animal table.
-- `generate_synthetic_data.py` writes the synthetic DeepLabCut tables.
+- `nol_analysis.py`: the analysis module and CLI entry point
+- `make_nol_figures.py`: draws the summary figure from a per-animal table
+- `generate_synthetic_data.py`: writes the synthetic DeepLabCut tables
 
-## Note on the synthetic data
-
-The synthetic data exists only so the code runs end to end on a fresh machine. It is drawn from random number generators. It is not real behavior and it is not meant to reflect any real result.
-
-## License
-
-MIT. See LICENSE.
+MIT licensed.
