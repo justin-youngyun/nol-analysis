@@ -69,10 +69,29 @@ python3 make_nol_figures.py --input outputs --output outputs/summary.png
 - a summary JSON with the run parameters and the cohort numbers
 - a summary figure: DI per animal, against wall time and distance
 
+## Also here
+
+`plot_b1a_splenocytes.py` is unrelated to the NOL pipeline — it plots a flow cytometry
+readout (splenic B-1a as a percentage of B cells, from the
+`Live / CD45+ / B cells / IgM+ IgDlo / CD43+ B220lo` gate) against the SCI cohort split:
+uninjured, and vehicle vs NM72 at 6 h and 24 h. The per-animal values and the cohort
+assignments are transcribed into the script, so it needs no input files:
+
+```
+python3 plot_b1a_splenocytes.py --output outputs/b1a_splenocytes.png --csv outputs/b1a_splenocytes.csv
+```
+
+Animal 489 is excluded, and 501, 503 and 504 are on the cohort sheet but absent from the
+FlowJo export. On startup it re-derives the mean and SD over every acquired sample and
+compares them against the FlowJo table footer, so a mistyped value shows up as a warning
+rather than as a quietly wrong figure. `--stats` annotates the vehicle-vs-NM72 Welch
+t-tests, `--dark` renders on a dark surface.
+
 ## Files
 
 - `nol_analysis.py`: the analysis module and CLI entry point
 - `make_nol_figures.py`: draws the summary figure from a per-animal table
 - `generate_synthetic_data.py`: writes the synthetic DeepLabCut tables
+- `plot_b1a_splenocytes.py`: the B-1a cohort figure described above
 
 MIT licensed.
