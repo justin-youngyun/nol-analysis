@@ -72,26 +72,34 @@ python3 make_nol_figures.py --input outputs --output outputs/summary.png
 ## Also here
 
 `plot_b1a_splenocytes.py` is unrelated to the NOL pipeline — it plots a flow cytometry
-readout (splenic B-1a as a percentage of B cells, from the
-`Live / CD45+ / B cells / IgM+ IgDlo / CD43+ B220lo` gate) against the SCI cohort split:
-uninjured, and vehicle vs NM72 at 6 h and 24 h. The per-animal values and the cohort
-assignments are transcribed into the script, so it needs no input files:
+readout against the SCI cohort split (uninjured, and vehicle vs NM72 at 6 h and 24 h).
+Two columns of the FlowJo B-1 table are carried:
+
+- `igm_pos` — the `Live / CD45+ / B cells / IgM+ IgDlo / CD43+ B220lo` gate, labelled
+  B-1a, as a percentage of B cells
+- `igm_neg` — the `IgM-` column of that same table
+
+The per-animal values and the cohort assignments are transcribed into the script, so it
+needs no input files:
 
 ```
-python3 plot_b1a_splenocytes.py --output outputs/b1a_splenocytes.png --csv outputs/b1a_splenocytes.csv
+python3 plot_b1a_splenocytes.py --measure both --output outputs/b1_both.png --csv outputs/b1_splenocytes.csv
 ```
+
+`--measure` takes `igm_pos`, `igm_neg`, or `both` (a two-panel figure, each panel on its
+own y-scale). `--stats` annotates the vehicle-vs-NM72 Welch t-tests, `--dark` renders on
+a dark surface.
 
 Animal 489 is excluded, and 501, 503 and 504 are on the cohort sheet but absent from the
-FlowJo export. On startup it re-derives the mean and SD over every acquired sample and
-compares them against the FlowJo table footer, so a mistyped value shows up as a warning
-rather than as a quietly wrong figure. `--stats` annotates the vehicle-vs-NM72 Welch
-t-tests, `--dark` renders on a dark surface.
+FlowJo export. On startup the script re-derives the mean and SD of each column over every
+acquired sample and compares them against that table's own footer, so a mistyped value
+shows up as a warning rather than as a quietly wrong figure.
 
 ## Files
 
 - `nol_analysis.py`: the analysis module and CLI entry point
 - `make_nol_figures.py`: draws the summary figure from a per-animal table
 - `generate_synthetic_data.py`: writes the synthetic DeepLabCut tables
-- `plot_b1a_splenocytes.py`: the B-1a cohort figure described above
+- `plot_b1a_splenocytes.py`: the B-1 cohort figures described above
 
 MIT licensed.

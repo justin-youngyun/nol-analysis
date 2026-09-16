@@ -1,13 +1,13 @@
 #!/usr/bin/env python
 """
-Splenic B-1a frequency after SCI, by cohort.
+Splenic B-1 populations after SCI, by cohort.
 
-Plots the FlowJo readout
+Plots the two columns of the FlowJo B-1 table against the cohort split
+(uninjured, and vehicle vs NM72 at 6 h and 24 h):
 
-    Cells / Single Cells / Live / CD45+ / B Cells / IgM+ IgDlo / CD43+ B220lo
-    B-1a, Freq. of B Cells
-
-against the cohort split (uninjured, and vehicle vs NM72 at 6 h and 24 h).
+  IgM+   Cells / Single Cells / Live / CD45+ / B Cells / IgM+ IgDlo /
+         CD43+ B220lo, labelled B-1a, Freq. of B Cells
+  IgM-   the IgM- column of that same table
 
 Every animal is drawn, because n is 3-4 per group and a bar alone would hide
 that. Each group gets its individual points, a mean crossbar, and SEM whiskers;
@@ -33,45 +33,67 @@ import pandas as pd
 from scipy import stats
 
 # ---------------------------------------------------------------------------
-# Data, transcribed from the cohort sheet and the FlowJo table
+# Data, transcribed from the cohort sheet and the FlowJo tables
 # ---------------------------------------------------------------------------
 
-# (animal, timepoint, treatment, B-1a % of B cells). NaN = on the cohort sheet
-# but no .fcs in the exported table.
-RECORDS: list[tuple[int, str, str, float]] = [
-    (497, "Uninjured", "Uninjured", 3.53),
-    (498, "Uninjured", "Uninjured", 5.68),
-    (499, "Uninjured", "Uninjured", 4.24),
+# (animal, timepoint, treatment, IgM+ %, IgM- %). NaN = on the cohort sheet but
+# no .fcs in the exported table.
+RECORDS: list[tuple[int, str, str, float, float]] = [
+    (497, "Uninjured", "Uninjured", 3.53, 3.16),
+    (498, "Uninjured", "Uninjured", 5.68, 2.63),
+    (499, "Uninjured", "Uninjured", 4.24, 2.89),
 
-    (483, "6 h", "Vehicle", 4.23),
-    (484, "6 h", "Vehicle", 8.60),
-    (487, "6 h", "Vehicle", 4.70),
-    (488, "6 h", "Vehicle", 3.12),
-    (503, "6 h", "Vehicle", np.nan),
-    (504, "6 h", "Vehicle", np.nan),
+    (483, "6 h", "Vehicle", 4.23, 1.63),
+    (484, "6 h", "Vehicle", 8.60, 2.79),
+    (487, "6 h", "Vehicle", 4.70, 2.35),
+    (488, "6 h", "Vehicle", 3.12, 3.41),
+    (503, "6 h", "Vehicle", np.nan, np.nan),
+    (504, "6 h", "Vehicle", np.nan, np.nan),
 
-    (481, "6 h", "NM72", 4.44),
-    (485, "6 h", "NM72", 3.99),
-    (486, "6 h", "NM72", 4.25),
-    (501, "6 h", "NM72", np.nan),
-    (502, "6 h", "NM72", 5.48),
+    (481, "6 h", "NM72", 4.44, 1.93),
+    (485, "6 h", "NM72", 3.99, 1.27),
+    (486, "6 h", "NM72", 4.25, 2.09),
+    (501, "6 h", "NM72", np.nan, np.nan),
+    (502, "6 h", "NM72", 5.48, 3.14),
 
-    (489, "24 h", "Vehicle", 17.60),
-    (491, "24 h", "Vehicle", 6.68),
-    (492, "24 h", "Vehicle", 8.15),
-    (495, "24 h", "Vehicle", 7.01),
+    (489, "24 h", "Vehicle", 17.60, 5.88),
+    (491, "24 h", "Vehicle", 6.68, 1.71),
+    (492, "24 h", "Vehicle", 8.15, 2.36),
+    (495, "24 h", "Vehicle", 7.01, 3.51),
 
-    (490, "24 h", "NM72", 6.21),
-    (493, "24 h", "NM72", 4.92),
-    (494, "24 h", "NM72", 2.93),
-    (496, "24 h", "NM72", 4.63),
+    (490, "24 h", "NM72", 6.21, 2.02),
+    (493, "24 h", "NM72", 4.92, 3.44),
+    (494, "24 h", "NM72", 2.93, 2.29),
+    (496, "24 h", "NM72", 4.63, 1.35),
 ]
 
 EXCLUDED: dict[int, str] = {489: "excluded by request"}
 
-# The FlowJo table footer, over every acquired sample including 489. Used as a
-# transcription check, not as an analysis input.
-FLOWJO_MEAN, FLOWJO_SD, FLOWJO_N = 5.81, 3.26, 19
+# What each column is and how to label it. flowjo_mean/sd are that table's own
+# footer over every acquired sample (489 included) and are used only as a
+# transcription check, never as an analysis input.
+MEASURES: dict[str, dict] = {
+    "igm_pos": {
+        "column": "igm_pos_pct",
+        "title": "Splenic B-1a frequency after SCI",
+        "panel": "IgM$^+$  (B-1a)",
+        "ylabel": "B-1a (% of B cells)",
+        "gating": "Live / CD45$^+$ / B cells / IgM$^+$ IgD$^{lo}$ / CD43$^+$ B220$^{lo}$",
+        "flowjo_mean": 5.81,
+        "flowjo_sd": 3.26,
+    },
+    "igm_neg": {
+        "column": "igm_neg_pct",
+        "title": "Splenic IgM$^-$ B-1 fraction after SCI",
+        "panel": "IgM$^-$",
+        "ylabel": "IgM$^-$ (% of B cells)",
+        "gating": "IgM$^-$ column of the same B-1 table  ·  read as % of B cells",
+        "flowjo_mean": 2.62,
+        "flowjo_sd": 1.05,
+    },
+}
+
+FLOWJO_N = 19
 
 # Group order along x, with the spacing that separates the timepoint blocks.
 GROUPS: list[tuple[str, str, float]] = [
@@ -81,6 +103,8 @@ GROUPS: list[tuple[str, str, float]] = [
     ("24 h", "Vehicle", 3.50),
     ("24 h", "NM72", 4.30),
 ]
+
+BRACKETS = {"6 h": (1.35, 2.15), "24 h": (3.50, 4.30)}
 
 # ---------------------------------------------------------------------------
 # Palette. Categorical slots 1 and 2 carry treatment identity; uninjured is
@@ -112,29 +136,35 @@ DARK = {
     "band": "#97968c",
 }
 
-GATING = "Live / CD45$^+$ / B cells / IgM$^+$ IgD$^{lo}$ / CD43$^+$ B220$^{lo}$"
-
 
 def build_frame() -> pd.DataFrame:
     """Tidy table of the cohort, with acquisition and exclusion flags."""
-    df = pd.DataFrame(RECORDS, columns=["animal", "timepoint", "treatment", "b1a_pct"])
-    df["acquired"] = df["b1a_pct"].notna()
+    df = pd.DataFrame(
+        RECORDS, columns=["animal", "timepoint", "treatment", "igm_pos_pct", "igm_neg_pct"]
+    )
+    df["acquired"] = df["igm_pos_pct"].notna()
     df["excluded"] = df["animal"].isin(EXCLUDED)
     df["exclusion_reason"] = df["animal"].map(EXCLUDED).fillna("")
     return df
 
 
-def check_transcription(df: pd.DataFrame) -> None:
-    """Warn if the transcribed values drift from the FlowJo table footer."""
-    vals = df.loc[df["acquired"], "b1a_pct"].to_numpy(dtype=float)
-    n, mean, sd = vals.size, float(np.mean(vals)), float(np.std(vals, ddof=1))
-    ok = n == FLOWJO_N and abs(mean - FLOWJO_MEAN) < 0.01 and abs(sd - FLOWJO_SD) < 0.01
-    tag = "matches" if ok else "DOES NOT MATCH"
-    print(f"Transcription check: n={n} mean={mean:.2f} SD={sd:.2f} "
-          f"({tag} FlowJo n={FLOWJO_N} mean={FLOWJO_MEAN} SD={FLOWJO_SD})")
-    if not ok:
-        print("  ^ re-check the values against the FlowJo table before using this figure.",
-              file=sys.stderr)
+def check_transcription(df: pd.DataFrame) -> bool:
+    """Warn if the transcribed values drift from either FlowJo table footer."""
+    all_ok = True
+    for key, meta in MEASURES.items():
+        vals = df.loc[df["acquired"], meta["column"]].to_numpy(dtype=float)
+        n, mean, sd = vals.size, float(np.mean(vals)), float(np.std(vals, ddof=1))
+        ok = (n == FLOWJO_N
+              and abs(mean - meta["flowjo_mean"]) < 0.01
+              and abs(sd - meta["flowjo_sd"]) < 0.01)
+        all_ok &= ok
+        tag = "matches" if ok else "DOES NOT MATCH"
+        print(f"Transcription check [{key}]: n={n} mean={mean:.2f} SD={sd:.2f} "
+              f"({tag} FlowJo n={FLOWJO_N} mean={meta['flowjo_mean']} SD={meta['flowjo_sd']})")
+        if not ok:
+            print(f"  ^ re-check the {key} column against the FlowJo table before using "
+                  "this figure.", file=sys.stderr)
+    return all_ok
 
 
 def analysis_set(df: pd.DataFrame) -> pd.DataFrame:
@@ -154,13 +184,18 @@ def _mean_sem(vals: np.ndarray) -> tuple[float, float]:
     return mean, sem
 
 
-def summarize(data: pd.DataFrame) -> pd.DataFrame:
+def _group_values(data: pd.DataFrame, timepoint: str, treatment: str, col: str) -> np.ndarray:
+    return data.loc[
+        (data["timepoint"] == timepoint) & (data["treatment"] == treatment), col
+    ].to_numpy(dtype=float)
+
+
+def summarize(data: pd.DataFrame, measure: str) -> pd.DataFrame:
     """Per-group n, mean, SD, SEM, in plotting order."""
+    col = MEASURES[measure]["column"]
     rows = []
     for timepoint, treatment, _x in GROUPS:
-        vals = data.loc[
-            (data["timepoint"] == timepoint) & (data["treatment"] == treatment), "b1a_pct"
-        ].to_numpy(dtype=float)
+        vals = _group_values(data, timepoint, treatment, col)
         if vals.size == 0:
             continue
         mean, sem = _mean_sem(vals)
@@ -175,14 +210,13 @@ def summarize(data: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def contrasts(data: pd.DataFrame) -> pd.DataFrame:
+def contrasts(data: pd.DataFrame, measure: str) -> pd.DataFrame:
     """Welch's t-test, vehicle vs NM72 at each injured timepoint."""
+    col = MEASURES[measure]["column"]
     rows = []
     for timepoint in ("6 h", "24 h"):
-        veh = data.loc[(data["timepoint"] == timepoint) & (data["treatment"] == "Vehicle"),
-                       "b1a_pct"].to_numpy(dtype=float)
-        nm = data.loc[(data["timepoint"] == timepoint) & (data["treatment"] == "NM72"),
-                      "b1a_pct"].to_numpy(dtype=float)
+        veh = _group_values(data, timepoint, "Vehicle", col)
+        nm = _group_values(data, timepoint, "NM72", col)
         if veh.size < 2 or nm.size < 2:
             continue
         t, p = stats.ttest_ind(veh, nm, equal_var=False)
@@ -201,35 +235,29 @@ def _p_label(p: float) -> str:
     return f"p = {p:.3f}" if p >= 0.001 else "p < 0.001"
 
 
-def plot_b1a(data: pd.DataFrame, out_path: Path, dark: bool = False,
-             show_stats: bool = False, title: str = "Splenic B-1a frequency after SCI") -> Path:
-    """Draw the cohort figure and save it to out_path."""
-    c = DARK if dark else LIGHT
-    out_path = Path(out_path)
-
-    fig, ax = plt.subplots(figsize=(7.0, 5.0), facecolor=c["surface"])
+def draw_panel(ax, data: pd.DataFrame, measure: str, c: dict, show_stats: bool = False,
+               panel_title: str | None = None, show_legend: bool = True) -> None:
+    """Draw one measure onto ax."""
+    meta = MEASURES[measure]
+    col = meta["column"]
     ax.set_facecolor(c["surface"])
 
-    # Uninjured baseline band, carried across the injured groups.
-    unin = data.loc[data["treatment"] == "Uninjured", "b1a_pct"].to_numpy(dtype=float)
+    unin = data.loc[data["treatment"] == "Uninjured", col].to_numpy(dtype=float)
     if unin.size:
         u_mean, u_sem = _mean_sem(unin)
-        ax.axhspan(u_mean - u_sem, u_mean + u_sem, xmin=0.0, xmax=1.0,
-                   color=c["band"], alpha=0.13, zorder=0, linewidth=0)
+        ax.axhspan(u_mean - u_sem, u_mean + u_sem, color=c["band"], alpha=0.13,
+                   zorder=0, linewidth=0)
         ax.axhline(u_mean, color=c["band"], linewidth=0.9, alpha=0.55, zorder=0)
 
-    ymax = float(np.nanmax(data["b1a_pct"])) if len(data) else 1.0
+    ymax = float(np.nanmax(data[col])) if len(data) else 1.0
     top = ymax * (1.45 if show_stats else 1.30)
 
     for timepoint, treatment, x in GROUPS:
-        vals = data.loc[
-            (data["timepoint"] == timepoint) & (data["treatment"] == treatment), "b1a_pct"
-        ].to_numpy(dtype=float)
+        vals = _group_values(data, timepoint, treatment, col)
         if vals.size == 0:
             continue
         hue = c[treatment]
         mean, sem = _mean_sem(vals)
-
         ax.errorbar(x, mean, yerr=sem, fmt="none", ecolor=hue,
                     elinewidth=1.4, capsize=5, capthick=1.4, zorder=2)
         ax.hlines(mean, x - 0.23, x + 0.23, color=hue, linewidth=2.4, zorder=3)
@@ -238,12 +266,11 @@ def plot_b1a(data: pd.DataFrame, out_path: Path, dark: bool = False,
         ax.text(x, top * 0.035, f"n={vals.size}", ha="center", va="bottom",
                 fontsize=8.5, color=c["text_muted"])
 
-    # Axes and chrome
     ax.set_xlim(-0.75, 5.05)
     ax.set_ylim(0, top)
     ax.set_xticks([x for _tp, _tr, x in GROUPS])
     ax.set_xticklabels([tr for _tp, tr, _x in GROUPS], color=c["text_secondary"])
-    ax.set_ylabel("B-1a (% of B cells)", color=c["text"], fontsize=11)
+    ax.set_ylabel(meta["ylabel"], color=c["text"], fontsize=11)
     ax.yaxis.grid(True, color=c["grid"], linewidth=0.8)
     ax.set_axisbelow(True)
     for side in ("top", "right"):
@@ -252,8 +279,7 @@ def plot_b1a(data: pd.DataFrame, out_path: Path, dark: bool = False,
         ax.spines[side].set_color(c["grid"])
     ax.tick_params(colors=c["text_secondary"], length=4, width=0.8)
 
-    # Timepoint brackets under the injured pairs
-    for timepoint, (lo, hi) in {"6 h": (1.35, 2.15), "24 h": (3.50, 4.30)}.items():
+    for timepoint, (lo, hi) in BRACKETS.items():
         ax.annotate("", xy=(lo, -0.105), xytext=(hi, -0.105),
                     xycoords=("data", "axes fraction"), textcoords=("data", "axes fraction"),
                     arrowprops=dict(arrowstyle="-", color=c["text_muted"], linewidth=0.9))
@@ -261,68 +287,113 @@ def plot_b1a(data: pd.DataFrame, out_path: Path, dark: bool = False,
                 transform=ax.get_xaxis_transform(), fontsize=10, color=c["text_secondary"])
 
     if show_stats:
-        con = contrasts(data)
-        for _, row in con.iterrows():
-            lo, hi = {"6 h": (1.35, 2.15), "24 h": (3.50, 4.30)}[row["timepoint"]]
-            grp = data[(data["timepoint"] == row["timepoint"])]
-            y = float(grp["b1a_pct"].max()) + top * 0.085
+        for _, row in contrasts(data, measure).iterrows():
+            lo, hi = BRACKETS[row["timepoint"]]
+            y = float(data.loc[data["timepoint"] == row["timepoint"], col].max()) + top * 0.085
             ax.plot([lo, lo, hi, hi], [y, y + top * 0.022, y + top * 0.022, y],
                     color=c["text_muted"], linewidth=0.9)
             ax.text((lo + hi) / 2, y + top * 0.032, _p_label(row["p"]), ha="center",
                     va="bottom", fontsize=8.5, color=c["text_secondary"])
 
-    handles = [
-        plt.Line2D([], [], marker="o", linestyle="", markersize=8, markerfacecolor=c[t],
-                   markeredgecolor=c["surface"], markeredgewidth=1.2, label=t)
-        for t in ("Uninjured", "Vehicle", "NM72")
-    ]
-    leg = ax.legend(handles=handles, loc="upper left", frameon=False, fontsize=9.5,
-                    handletextpad=0.4, borderaxespad=0.2, ncol=3, columnspacing=1.4)
-    for text in leg.get_texts():
-        text.set_color(c["text_secondary"])
+    if show_legend:
+        handles = [
+            plt.Line2D([], [], marker="o", linestyle="", markersize=8, markerfacecolor=c[t],
+                       markeredgecolor=c["surface"], markeredgewidth=1.2, label=t)
+            for t in ("Uninjured", "Vehicle", "NM72")
+        ]
+        leg = ax.legend(handles=handles, loc="upper left", frameon=False, fontsize=9.5,
+                        handletextpad=0.4, borderaxespad=0.2, ncol=3, columnspacing=1.4)
+        for text in leg.get_texts():
+            text.set_color(c["text_secondary"])
 
-    fig.suptitle(title, fontsize=13, fontweight="bold", color=c["text"], x=0.085, ha="left", y=0.995)
-    ax.set_title(f"{GATING}  ·  mean ± SEM, every animal shown",
-                 fontsize=9, color=c["text_secondary"], loc="left", pad=14)
+    if panel_title:
+        ax.set_title(panel_title, fontsize=10.5, fontweight="bold", color=c["text"],
+                     loc="left", pad=10)
 
-    notes = ["489 excluded (24 h vehicle)", "501, 503, 504 on the cohort sheet, not in the export"]
-    if unin.size:
-        notes.append("shaded band = uninjured mean ± SEM")
+
+def _footnote(c: dict, fig, extra: list[str] | None = None) -> None:
+    notes = ["489 excluded (24 h vehicle)",
+             "501, 503, 504 on the cohort sheet, not in the export",
+             "shaded band = uninjured mean ± SEM"]
+    if extra:
+        notes += extra
     fig.text(0.085, 0.01, "  ·  ".join(notes), fontsize=8, color=c["text_muted"], ha="left")
 
+
+def plot_measure(data: pd.DataFrame, measure: str, out_path: Path, dark: bool = False,
+                 show_stats: bool = False, title: str | None = None) -> Path:
+    """Single-panel figure for one measure."""
+    c = DARK if dark else LIGHT
+    meta = MEASURES[measure]
+    out_path = Path(out_path)
+
+    fig, ax = plt.subplots(figsize=(7.0, 5.0), facecolor=c["surface"])
+    draw_panel(ax, data, measure, c, show_stats=show_stats)
+    ax.set_title(f"{meta['gating']}  ·  mean ± SEM, every animal shown",
+                 fontsize=9, color=c["text_secondary"], loc="left", pad=14)
+    fig.suptitle(title or meta["title"], fontsize=13, fontweight="bold", color=c["text"],
+                 x=0.085, ha="left", y=0.995)
+    _footnote(c, fig)
     fig.tight_layout(rect=[0.02, 0.055, 1, 0.955])
     fig.savefig(out_path, bbox_inches="tight", facecolor=c["surface"], dpi=200)
     plt.close(fig)
     return out_path
 
 
+def plot_both(data: pd.DataFrame, out_path: Path, dark: bool = False,
+              show_stats: bool = False,
+              title: str = "Splenic B-1 populations after SCI") -> Path:
+    """Two-panel figure, IgM+ beside IgM-, each on its own y-scale."""
+    c = DARK if dark else LIGHT
+    out_path = Path(out_path)
+
+    fig, axes = plt.subplots(1, 2, figsize=(13.0, 5.2), facecolor=c["surface"])
+    for ax, measure, legend in zip(axes, ("igm_pos", "igm_neg"), (True, False)):
+        draw_panel(ax, data, measure, c, show_stats=show_stats,
+                   panel_title=MEASURES[measure]["panel"], show_legend=legend)
+    fig.suptitle(title, fontsize=13, fontweight="bold", color=c["text"],
+                 x=0.045, ha="left", y=0.995)
+    _footnote(c, fig, extra=["panels have independent y-scales"])
+    fig.tight_layout(rect=[0.01, 0.055, 1, 0.945])
+    fig.savefig(out_path, bbox_inches="tight", facecolor=c["surface"], dpi=200)
+    plt.close(fig)
+    return out_path
+
+
 def main(argv: list[str] | None = None) -> int:
-    p = argparse.ArgumentParser(description="Plot splenic B-1a frequency by SCI cohort.")
-    p.add_argument("--output", default="outputs/b1a_splenocytes.png",
-                   help="Output image path (.png or .pdf).")
+    p = argparse.ArgumentParser(description="Plot splenic B-1 frequencies by SCI cohort.")
+    p.add_argument("--measure", choices=["igm_pos", "igm_neg", "both"], default="both",
+                   help="Which column to plot. 'both' draws a two-panel figure.")
+    p.add_argument("--output", default=None,
+                   help="Output image path. Defaults to outputs/b1_<measure>.png.")
     p.add_argument("--csv", default=None, help="Also write the tidy per-animal table here.")
     p.add_argument("--dark", action="store_true", help="Render on the dark surface.")
     p.add_argument("--stats", action="store_true",
                    help="Annotate vehicle-vs-NM72 Welch t-tests (underpowered at this n).")
-    p.add_argument("--title", default="Splenic B-1a frequency after SCI")
+    p.add_argument("--title", default=None)
     ns = p.parse_args(argv if argv is not None else sys.argv[1:])
 
     df = build_frame()
     check_transcription(df)
     data = analysis_set(df)
 
-    print("\nPer group (acquired, 489 excluded):")
-    print(summarize(data).to_string(index=False, float_format=lambda v: f"{v:.2f}"))
+    for key in (MEASURES if ns.measure == "both" else [ns.measure]):
+        print(f"\n[{key}] per group (acquired, 489 excluded):")
+        print(summarize(data, key).to_string(index=False, float_format=lambda v: f"{v:.2f}"))
+        con = contrasts(data, key)
+        if not con.empty:
+            print(f"[{key}] vehicle vs NM72, Welch's t-test "
+                  "(n=3-4 per group: descriptive, not a powered test):")
+            print(con.to_string(index=False, float_format=lambda v: f"{v:.3f}"))
 
-    con = contrasts(data)
-    if not con.empty:
-        print("\nVehicle vs NM72, Welch's t-test "
-              "(n=3-4 per group: treat as descriptive, not a powered test):")
-        print(con.to_string(index=False, float_format=lambda v: f"{v:.3f}"))
-
-    out_path = Path(ns.output)
+    out_path = Path(ns.output) if ns.output else Path(f"outputs/b1_{ns.measure}.png")
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    plot_b1a(data, out_path, dark=ns.dark, show_stats=ns.stats, title=ns.title)
+    if ns.measure == "both":
+        plot_both(data, out_path, dark=ns.dark, show_stats=ns.stats,
+                  title=ns.title or "Splenic B-1 populations after SCI")
+    else:
+        plot_measure(data, ns.measure, out_path, dark=ns.dark, show_stats=ns.stats,
+                     title=ns.title)
     print(f"\nSaved: {out_path}")
 
     if ns.csv:
