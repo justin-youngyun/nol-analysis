@@ -137,7 +137,7 @@ def parse_metadata(wsp_path: Path, group: str = SPL_GROUP) -> pd.DataFrame:
         kw = {k.get("name"): k.get("value") for k in smp.iter("Keyword")}
         rows.append({"sample": sn.get("name"), "sampleID": str(sn.get("sampleID")),
                      "date": kw.get("$DATE"), "btim": kw.get("$BTIM"),
-                     "cytometer": kw.get("$CYT")})
+                     "flowrate": kw.get("$FLOWRATE"), "cytometer": kw.get("$CYT")})
     return pd.DataFrame(rows)
 
 
@@ -315,11 +315,14 @@ def plot_qc(wide: pd.DataFrame, threshold: int, out_path: Path, dark: bool = Fal
 
 
 def plot_acquisition_qc(wide: pd.DataFrame, out_path: Path, dark: bool = False) -> Path:
-    """Three gating-quality readouts against the order the samples were run in.
+    """Gating- and sample-quality readouts against the order the samples were run in.
 
-    Drawn because the cohort effect and the run order are not independent here:
-    if a block of consecutive samples separates from the rest, a group that sits
-    inside that block cannot be compared with one that sits outside it.
+    Drawn because the cohort effect and the sample quality are not independent
+    here. Run order is the x axis only because it is the axis a whole-session
+    problem would show up on; what the panels actually compare is quality, and a
+    cohort group whose samples all sit at one end of that range cannot be
+    compared with one at the other end. Acquisition settings that differ between
+    tubes are marked, since those are a cause rather than a symptom.
     """
     c = sc.palette(dark)
     d = wide.dropna(subset=["btim"]).sort_values(["date", "btim"]).reset_index(drop=True)
@@ -327,11 +330,14 @@ def plot_acquisition_qc(wide: pd.DataFrame, out_path: Path, dark: bool = False) 
     metrics = [
         ("CD4$^+$ + CD8$^+$\n(% of CD3$^+$)",
          100 * (d[CD4].astype(float) + d[f"{CD3}/CD8+"].astype(float)) / cd3),
+        ("Live leukocytes\n(% of singlets)",
+         100 * d[LIVE].astype(float) / d["Cells/Single Cells"].astype(float)),
+        ("Singlets (% of cells)\nscatter only, no antibody",
+         100 * d["Cells/Single Cells"].astype(float) / d["Cells"].astype(float)),
         ("CD3$^+$\n(% of live)", 100 * cd3 / d[LIVE].astype(float)),
-        ("CD4$^+$\n(% of CD3$^+$)", 100 * d[CD4].astype(float) / cd3),
     ]
 
-    fig, axes = plt.subplots(len(metrics), 1, figsize=(10.5, 8.2), sharex=True,
+    fig, axes = plt.subplots(len(metrics), 1, figsize=(10.5, 10.4), sharex=True,
                              facecolor=c["surface"])
     x = np.arange(len(d))
     flagged = d["tech_block"].to_numpy()
@@ -356,9 +362,22 @@ def plot_acquisition_qc(wide: pd.DataFrame, out_path: Path, dark: bool = False) 
         ax.tick_params(colors=c["text_secondary"], length=4, width=0.8, labelsize=9)
 
     if lo is not None:
-        axes[0].text((lo + hi) / 2, 1.04, "consecutive run window",
+        axes[0].text((lo + hi) / 2, 1.04, "high-quality block",
                      transform=axes[0].get_xaxis_transform(), ha="center", va="bottom",
                      fontsize=9.5, color=c["flag"], fontweight="bold")
+    rates = d["flowrate"].fillna("")
+    odd = rates[rates != ""].value_counts()
+    minority = odd.index[-1] if len(odd) > 1 else None
+    if minority is not None:
+        for ax in axes:
+            for xi, r in zip(x, rates):
+                if r == minority:
+                    ax.axvline(xi, color=c["flag"], linewidth=8, alpha=0.10, zorder=0)
+        axes[0].text(0.995, 1.04, f"vertical bars: flow rate = {minority} "
+                     f"({int(odd.iloc[-1])} tubes; all others {odd.index[0]})",
+                     transform=axes[0].transAxes, ha="right", va="bottom",
+                     fontsize=8.5, color=c["flag"])
+
     axes[-1].set_xticks(x)
     axes[-1].set_xticklabels([f"{int(a)}\n{t[:5]}" for a, t in zip(d["animal"], d["btim"])],
                              fontsize=8, color=c["text_secondary"])
@@ -369,10 +388,11 @@ def plot_acquisition_qc(wide: pd.DataFrame, out_path: Path, dark: bool = False) 
                      handletextpad=0.4, columnspacing=1.4)
     for t in leg.get_texts():
         t.set_color(c["text_secondary"])
-    fig.suptitle("Gating quality against run order", fontsize=13, fontweight="bold",
+    fig.suptitle("Sample and gating quality across the run", fontsize=13, fontweight="bold",
                  color=c["text"], x=0.045, ha="left", y=0.995)
-    axes[0].set_title("CD4 and CD8 should account for most CD3$^+$ events in spleen; "
-                      "where they do not, the CD3 gate is holding something else",
+    axes[0].set_title("CD4 and CD8 should account for most CD3$^+$ events in spleen; where they "
+                      "do not, the CD3 gate is holding something else.\nThat readout tracks "
+                      "viability and doublet rate, so it is sample quality, not biology.",
                       fontsize=9, color=c["text_secondary"], loc="left", pad=26)
     fig.tight_layout(rect=[0.01, 0.01, 1, 0.94])
     fig.savefig(out_path, bbox_inches="tight", facecolor=c["surface"], dpi=200)
@@ -445,11 +465,11 @@ def main(argv: list[str] | None = None) -> int:
     if len(meta):
         sid = counts.drop_duplicates("sample").set_index("sample")["sampleID"].astype(str)
         wide["sampleID"] = wide["sample"].map(sid)
-        wide = wide.merge(meta.astype({"sampleID": str})[["sampleID", "date", "btim"]],
-                          on="sampleID", how="left")
-    else:
-        wide["date"] = None
-        wide["btim"] = None
+        keep = [c for c in ("sampleID", "date", "btim", "flowrate") if c in meta.columns]
+        wide = wide.merge(meta.astype({"sampleID": str})[keep], on="sampleID", how="left")
+    for c in ("date", "btim", "flowrate"):
+        if c not in wide.columns:
+            wide[c] = None
     unmapped = wide[wide["treatment"].isna()]["animal"].tolist()
     if unmapped:
         print(f"Not in the cohort sheet, skipped: {unmapped}")
@@ -481,7 +501,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  Consecutive in acquisition order: {contiguous}")
         print(f"  Cohort groups falling ENTIRELY inside it: {whole or 'none'}")
         if whole:
-            confound = (f"run-order cluster {sorted(int(a) for a in block['animal'])} "
+            confound = (f"QC cluster {sorted(int(a) for a in block['animal'])} "
                         f"wholly contains {', '.join(whole)} - comparisons confounded")
             print("  -> Any cohort difference involving those groups is confounded with "
                   "the acquisition window.")

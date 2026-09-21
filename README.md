@@ -121,12 +121,16 @@ with a red title.
 It also writes two QC figures, which are the point as much as the population plots are:
 
 - `flow_qc_live.png` — live leukocyte yield per animal against the exclusion threshold.
-- `flow_qc_runorder.png` — CD4+CD8 as a share of CD3+, CD3+ of live, and CD4+ of CD3+
-  against the order the tubes were acquired in. CD4 and CD8 should account for most
-  CD3+ events in spleen; where they do not, the CD3 gate is holding something else.
-  The script splits that measure at its largest gap, widens the split to the contiguous
-  acquisition window it covers, and warns on the figure if any cohort group falls
-  entirely inside that window — such a group cannot be compared with one outside it.
+- `flow_qc_runorder.png` — CD4+CD8 as a share of CD3+, viability, doublet rate and
+  CD3+ of live, against the order the tubes were acquired in. CD4 and CD8 should
+  account for most CD3+ events in spleen; where they do not, the CD3 gate is holding
+  something else, and that readout tracks viability (Spearman 0.76) and the
+  scatter-only singlet gate — so it is sample quality, not fluorescence and not
+  biology. Tubes whose acquisition settings differ from the rest are marked, since
+  those are a cause rather than a symptom. The script splits the measure at its
+  largest gap, widens the split to the acquisition window it spans, and warns on the
+  figure if any cohort group falls entirely inside it — such a group cannot be
+  compared with one outside it.
 
 ## Files
 
