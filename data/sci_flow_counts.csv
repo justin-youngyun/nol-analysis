@@ -125,9 +125,9 @@ sample,sampleID,path,pop,kind,depth,count,parent_path
 487.fcs,93,Cells/Single Cells/Live Leukocytes/CD3+-/CD11b+F4_80+/Eosinophils-/Ly6G-,Ly6G-,Population,7,56,Cells/Single Cells/Live Leukocytes/CD3+-/CD11b+F4_80+/Eosinophils-
 487.fcs,93,Cells/Single Cells/Live Leukocytes/CD3+-/CD11b+F4_80+/Eosinophils-/Ly6G-/M1 Like,M1 Like,Population,8,54,Cells/Single Cells/Live Leukocytes/CD3+-/CD11b+F4_80+/Eosinophils-/Ly6G-
 487.fcs,93,Cells/Single Cells/Live Leukocytes/CD3+-/CD11b+F4_80+/Eosinophils-/Ly6G-/M2 Like,M2 Like,Population,8,2,Cells/Single Cells/Live Leukocytes/CD3+-/CD11b+F4_80+/Eosinophils-/Ly6G-
-487.fcs,93,Cells/Single Cells/Live Leukocytes/CD3+-/CD11b+F4_80-,CD11b+F4_80-,Population,5,740,Cells/Single Cells/Live Leukocytes/CD3+-
-487.fcs,93,Cells/Single Cells/Live Leukocytes/CD3+-/CD11b+F4_80-/Monocytes,Monocytes,Population,6,52,Cells/Single Cells/Live Leukocytes/CD3+-/CD11b+F4_80-
-487.fcs,93,Cells/Single Cells/Live Leukocytes/CD3+-/CD11b+F4_80-/Neutrophils,Neutrophils,Population,6,671,Cells/Single Cells/Live Leukocytes/CD3+-/CD11b+F4_80-
+487.fcs,93,Cells/Single Cells/Live Leukocytes/CD3+-/CD11b+F4_80-,CD11b+F4_80-,Population,5,803,Cells/Single Cells/Live Leukocytes/CD3+-
+487.fcs,93,Cells/Single Cells/Live Leukocytes/CD3+-/CD11b+F4_80-/Monocytes,Monocytes,Population,6,63,Cells/Single Cells/Live Leukocytes/CD3+-/CD11b+F4_80-
+487.fcs,93,Cells/Single Cells/Live Leukocytes/CD3+-/CD11b+F4_80-/Neutrophils,Neutrophils,Population,6,720,Cells/Single Cells/Live Leukocytes/CD3+-/CD11b+F4_80-
 487.fcs,93,Cells/Single Cells/Live Leukocytes/CD3+-/Red pulp Macs,Red pulp Macs,Population,5,328,Cells/Single Cells/Live Leukocytes/CD3+-
 487.fcs,93,Cells/Single Cells/Live Leukocytes/CD3+-/Red pulp Macs/M1 Like,M1 Like,Population,6,324,Cells/Single Cells/Live Leukocytes/CD3+-/Red pulp Macs
 487.fcs,93,Cells/Single Cells/Live Leukocytes/CD3+-/Red pulp Macs/M2 Like,M2 Like,Population,6,3,Cells/Single Cells/Live Leukocytes/CD3+-/Red pulp Macs

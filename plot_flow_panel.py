@@ -20,6 +20,7 @@ not:
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -37,6 +38,7 @@ import plot_b1a_splenocytes as b1a
 
 DEFAULT_COUNTS = Path("data/sci_flow_counts.csv")
 DEFAULT_META = Path("data/sci_flow_samples.csv")
+DEFAULT_MFI = Path("data/sci_flow_mfi.csv")
 SPL_GROUP = "Spl"
 NODE_TAGS = {"Population", "NotNode", "OrNode", "AndNode"}
 
@@ -94,6 +96,34 @@ def add_b1a(wide: pd.DataFrame) -> list:
     if missing:
         print(f"No B cell panel data for: {missing}")
     return B1A_PANELS
+
+
+# Populations that belong on one graph together. Anything not named here still
+# gets its own single-population figure.
+FAMILIES: dict[str, list[str]] = {
+    "T cells and Tregs": ["CD3$^+$ T cells", "CD4$^+$", "CD8$^+$", "CD4:CD8 ratio",
+                          "CD25$^+$CD127$^-$", "Tregs"],
+    "B cells": ["B-1a  (IgM$^+$)", "IgM$^-$"],
+    "Macrophages": ["CD11b$^+$F4/80$^+$", "CD11b$^+$F4/80$^-$", "Red pulp macrophages"],
+    "Granulocytes and monocytes": ["Neutrophils", "Monocytes"],
+    "MerTK on red pulp macrophages": ["MerTK Median (M1 Like)", "MerTK Median (M2 Like)"],
+    "Macrophage subsets (low events)": ["Eosinophils", "Ly6G$^-$", "M1-like (Ly6G$^-$)",
+                                        "M2-like (Ly6G$^-$)", "M1-like (red pulp)",
+                                        "M2-like (red pulp)"],
+}
+
+
+def _slug(label: str) -> str:
+    """A filename from a panel label, with the TeX markup taken back out."""
+    t = (label.replace("$^+$", "pos").replace("$^-$", "neg").replace("$^{lo}$", "lo")
+              .replace("/", "-").replace(":", "-").replace(" ", "_"))
+    return re.sub(r"[^A-Za-z0-9_.-]", "", t).strip("_")
+
+
+def _plain(label: str) -> str:
+    """The label as a person would type it, for CSV headers."""
+    return (label.replace("$^+$", "+").replace("$^-$", "-").replace("$^{lo}$", "lo")
+                 .replace("  ", " ").strip())
 
 
 # A frequency computed from a handful of events is noise, not a measurement.
@@ -198,6 +228,51 @@ def detect_outlier_block(wide: pd.DataFrame) -> pd.Series:
     return seed.fillna(False)
 
 
+def parse_mfi(wsp_path: Path, group: str = SPL_GROUP) -> pd.DataFrame:
+    """Non-frequency statistics (MFI, medians) stored on gate nodes.
+
+    FlowJo hangs these off the node's Subpopulations element rather than the
+    node itself, beside the child gates, so a walk that only reads gate nodes
+    steps straight past them.
+    """
+    root = ET.parse(wsp_path).getroot()
+    wanted = {sr.get("sampleID")
+              for g in root.iter("GroupNode") if g.get("name") == group
+              for sr in g.iter("SampleRef")}
+    detector = {}
+    for smp in root.iter("Sample"):
+        sn = smp.find("SampleNode")
+        if sn is None or sn.get("sampleID") not in wanted:
+            continue
+        kw = {k.get("name"): k.get("value") for k in smp.iter("Keyword")}
+        for key, val in kw.items():
+            m = re.fullmatch(r"\$P(\d+)N", key)
+            if m and kw.get(f"$P{m.group(1)}S"):
+                detector[val] = kw[f"$P{m.group(1)}S"]
+        break
+
+    rows = []
+
+    def walk(node, path, sample, sid):
+        subs = node.find("Subpopulations")
+        if subs is None:
+            return
+        for child in subs:
+            if child.tag == "Statistic" and child.get("name") != "fj.stat.freqof":
+                det = (child.get("id") or "").replace("Comp-", "")
+                rows.append({"sample": sample, "sampleID": sid, "path": "/".join(path),
+                             "stat": child.get("name"), "detector": det,
+                             "marker": detector.get(det, det),
+                             "value": float(child.get("value") or "nan")})
+            if child.tag in NODE_TAGS:
+                walk(child, path + [child.get("name")], sample, sid)
+
+    for sn in root.iter("SampleNode"):
+        if sn.get("sampleID") in wanted:
+            walk(sn, [], sn.get("name"), sn.get("sampleID"))
+    return pd.DataFrame(rows)
+
+
 def resolve_duplicates(counts: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
     """A sample imported twice keeps the entry with more events."""
     notes = []
@@ -260,8 +335,11 @@ def plot_grid(data: pd.DataFrame, panels: list, out_path: Path, title: str,
                baseline=False) if drug_only else {}
     treatments = ("Vehicle", "NM72") if drug_only else ("Uninjured", "Vehicle", "NM72")
     nrows = int(np.ceil(len(panels) / ncols))
-    fig, axes = plt.subplots(nrows, ncols, figsize=(3.55 * ncols, 3.15 * nrows),
+    # extra height for the title band, so a long title cannot run into the legend
+    head = 0.75
+    fig, axes = plt.subplots(nrows, ncols, figsize=(3.55 * ncols, 3.15 * nrows + head),
                              facecolor=c["surface"], squeeze=False)
+    h_total = 3.15 * nrows + head
     flat = axes.flatten()
 
     for i, (label, key, denom_label) in enumerate(panels):
@@ -279,15 +357,16 @@ def plot_grid(data: pd.DataFrame, panels: list, out_path: Path, title: str,
     for ax in flat[len(panels):]:
         ax.set_visible(False)
 
-    leg = fig.legend(handles=sc.legend_handles(c, treatments), loc="upper right", frameon=False,
-                     fontsize=9.5, ncol=3, bbox_to_anchor=(0.995, 0.995),
+    leg = fig.legend(handles=sc.legend_handles(c, treatments), loc="upper left", frameon=False,
+                     fontsize=9.5, ncol=3, bbox_to_anchor=(0.05, 1 - 0.42 / h_total),
                      handletextpad=0.4, columnspacing=1.4)
     for t in leg.get_texts():
         t.set_color(c["text_secondary"])
     fig.suptitle(title, fontsize=13, fontweight="bold", color=c["text"],
-                 x=0.05, ha="left", y=0.995)
+                 x=0.05, ha="left", y=1 - 0.10 / h_total)
     _footnote(fig, c, notes or [])
-    fig.tight_layout(rect=[0.005, 0.035, 1, 0.955], h_pad=2.6, w_pad=1.8)
+    fig.tight_layout(rect=[0.005, 0.035, 1, 1 - (head - 0.05) / h_total],
+                     h_pad=2.6, w_pad=1.8)
     fig.savefig(out_path, bbox_inches="tight", facecolor=c["surface"], dpi=200)
     plt.close(fig)
     return out_path
@@ -524,6 +603,95 @@ def plot_contrast(data: pd.DataFrame, panels: list, out_path: Path, dark: bool =
     return out_path
 
 
+def plot_single(data: pd.DataFrame, label: str, key: str, denom: str, out_path: Path,
+                dark: bool = False, drug_only: bool = False) -> Path:
+    """One population, one figure."""
+    c = sc.palette(dark)
+    gkw = dict(groups=sc.DRUG_GROUPS, brackets=sc.DRUG_BRACKETS, ticks=sc.DRUG_TICKS,
+               baseline=False) if drug_only else {}
+    treatments = ("Vehicle", "NM72") if drug_only else ("Uninjured", "Vehicle", "NM72")
+    fig, ax = plt.subplots(figsize=(4.6, 4.4), facecolor=c["surface"])
+    sc.draw_panel(ax, data, key, c, ylabel=denom, compact=False, show_ticklabels=True,
+                  show_brackets=True, show_legend=False, show_n=True, **gkw)
+    leg = ax.legend(handles=sc.legend_handles(c, treatments), loc="upper left",
+                    frameon=False, fontsize=8.5, ncol=len(treatments),
+                    handletextpad=0.35, borderaxespad=0.2, columnspacing=1.0)
+    for t in leg.get_texts():
+        t.set_color(c["text_secondary"])
+    fig.suptitle(_plain(label), fontsize=12, fontweight="bold", color=c["text"],
+                 x=0.02, ha="left", y=0.995)
+    fig.tight_layout(rect=[0, 0, 1, 0.94])
+    fig.savefig(out_path, bbox_inches="tight", facecolor=c["surface"], dpi=200)
+    plt.close(fig)
+    return out_path
+
+
+def export_prism(data: pd.DataFrame, panels: list, outdir: Path) -> None:
+    """Per-animal values, group summaries, contrasts, and one table per graph.
+
+    Prism builds a graph from a table whose columns are the groups, so each
+    population also gets its own file laid out that way: paste it straight in.
+    """
+    pdir = outdir / "prism"
+    (pdir / "per_graph").mkdir(parents=True, exist_ok=True)
+
+    long_rows, summary_rows, contrast_rows = [], [], []
+    for label, key, denom in panels:
+        plain = _plain(label)
+        for _, r in data.iterrows():
+            v = r[key]
+            if pd.isna(v):
+                continue
+            nev = r.get(key + "__n", np.nan)
+            long_rows.append({"animal": int(r["animal"]), "timepoint": r["timepoint"],
+                              "treatment": r["treatment"],
+                              "group": f"{r['timepoint']} {r['treatment']}".replace(
+                                  "Uninjured Uninjured", "Uninjured"),
+                              "population": plain, "denominator": _plain(denom or ""),
+                              "value": float(v),
+                              "events": float(nev) if pd.notna(nev) else np.nan})
+        wide_cols = {}
+        for tp, tr, _x in sc.GROUPS:
+            gname = f"{tp} {tr}".replace("Uninjured Uninjured", "Uninjured")
+            vals = sc.group_values(data, tp, tr, key)
+            wide_cols[gname] = list(vals)
+            mean, sem = sc.mean_sem(vals)
+            ev = data.loc[(data["timepoint"] == tp) & (data["treatment"] == tr),
+                          key + "__n"] if key + "__n" in data.columns else pd.Series(dtype=float)
+            summary_rows.append({"population": plain, "denominator": _plain(denom or ""),
+                                 "group": gname, "n": vals.size,
+                                 "median_events": float(np.nanmedian(ev)) if len(ev.dropna()) else np.nan,
+                                 "mean": mean,
+                                 "sd": float(np.std(vals, ddof=1)) if vals.size > 1 else np.nan,
+                                 "sem": sem})
+        width = max((len(v) for v in wide_cols.values()), default=0)
+        pd.DataFrame({k: v + [np.nan] * (width - len(v)) for k, v in wide_cols.items()}).to_csv(
+            pdir / "per_graph" / f"{_slug(label)}.csv", index=False)
+
+        for tp in ("6 h", "24 h"):
+            veh = sc.group_values(data, tp, "Vehicle", key)
+            nm = sc.group_values(data, tp, "NM72", key)
+            if veh.size < 2 or nm.size < 2:
+                continue
+            t, pv = stats.ttest_ind(veh, nm, equal_var=False)
+            g, lo, hi = _hedges_g(veh, nm)
+            contrast_rows.append({"population": plain, "timepoint": tp,
+                                  "n_vehicle": veh.size, "n_nm72": nm.size,
+                                  "mean_vehicle": float(np.mean(veh)),
+                                  "mean_nm72": float(np.mean(nm)),
+                                  "ratio_nm72_over_vehicle": float(np.mean(nm) / np.mean(veh))
+                                  if np.mean(veh) else np.nan,
+                                  "welch_t": float(t), "welch_p": float(pv),
+                                  "hedges_g": g, "g_ci_low": lo, "g_ci_high": hi})
+
+    pd.DataFrame(long_rows).to_csv(pdir / "per_animal_long.csv", index=False)
+    pd.DataFrame(summary_rows).to_csv(pdir / "group_summary.csv", index=False)
+    pd.DataFrame(contrast_rows).sort_values(["timepoint", "welch_p"]).to_csv(
+        pdir / "contrasts_vehicle_vs_nm72.csv", index=False)
+    print(f"Prism bundle: {pdir}/ "
+          f"(per_animal_long, group_summary, contrasts, per_graph/*.csv)")
+
+
 def summarize(data: pd.DataFrame, key: str, label: str) -> pd.DataFrame:
     rows = []
     for tp, tr, _x in sc.GROUPS:
@@ -556,6 +724,8 @@ def main(argv: list[str] | None = None) -> int:
                    help="Cached counts CSV (written when --wsp is given, else read).")
     p.add_argument("--meta", default=str(DEFAULT_META),
                    help="Cached per-sample acquisition metadata CSV.")
+    p.add_argument("--mfi", default=str(DEFAULT_MFI),
+                   help="Cached non-frequency (MFI) statistics CSV.")
     p.add_argument("--group", default=SPL_GROUP, help="Workspace group to use.")
     p.add_argument("--min-live", type=int, default=1000,
                    help="Drop animals with fewer live leukocyte events than this.")
@@ -567,12 +737,15 @@ def main(argv: list[str] | None = None) -> int:
 
     counts_path = Path(ns.counts)
     meta_path = Path(ns.meta)
+    mfi_path = Path(ns.mfi)
     if ns.wsp:
         counts = parse_wsp(Path(ns.wsp), group=ns.group)
         meta = parse_metadata(Path(ns.wsp), group=ns.group)
+        mfi = parse_mfi(Path(ns.wsp), group=ns.group)
         counts_path.parent.mkdir(parents=True, exist_ok=True)
         counts.to_csv(counts_path, index=False)
         meta.to_csv(meta_path, index=False)
+        mfi.to_csv(mfi_path, index=False)
         print(f"Parsed {ns.wsp} -> {counts_path}, {meta_path}")
     else:
         if not counts_path.exists():
@@ -580,6 +753,7 @@ def main(argv: list[str] | None = None) -> int:
         counts = pd.read_csv(counts_path, keep_default_na=False, na_values=[""])
         counts["count"] = counts["count"].astype(int)
         meta = pd.read_csv(meta_path) if meta_path.exists() else pd.DataFrame()
+        mfi = pd.read_csv(mfi_path) if mfi_path.exists() else pd.DataFrame()
 
     counts, dup_notes = resolve_duplicates(counts)
     for n in dup_notes:
@@ -643,6 +817,25 @@ def main(argv: list[str] | None = None) -> int:
 
     # CD4:CD8 is denominator-free, so it survives a shift in total T cell number.
     specs["bcell"] = add_b1a(wide)
+
+    # Non-frequency statistics, when the workspace carries any.
+    mfi_specs = []
+    if len(mfi):
+        mfi = mfi.astype({"sampleID": str})
+        for (path, marker, stat), grp in mfi.groupby(["path", "marker", "stat"]):
+            label = f"{marker} {stat} ({path.split('/')[-1]})"
+            key = f"mfi::{label}"
+            # keyed on sampleID, not sample name: a sample imported twice shares
+            # its name, and resolve_duplicates has already picked which id wins
+            lookup = grp.drop_duplicates("sampleID").set_index("sampleID")["value"]
+            wide[key] = wide["sampleID"].map(lookup)
+            if path in wide.columns:
+                wide[key + "__n"] = wide[path].astype(float)
+            got = int(wide[key].notna().sum())
+            mfi_specs.append((label, key, f"{stat} fluorescence intensity"))
+            if got < len(wide):
+                print(f"  {label}: present for {got}/{len(wide)} animals")
+    specs["mfi"] = mfi_specs
 
     wide["pct::CD4:CD8 ratio"] = (wide[CD4].astype(float)
                                   / wide[f"{CD3}/CD8+"].astype(float).where(
@@ -711,18 +904,46 @@ def main(argv: list[str] | None = None) -> int:
     # arms differ on sample quality cannot separate drug from prep.
     bad_tp = set()
     for tp in ("6 h", "24 h"):
-        sub = wide[wide["timepoint"] == tp]
-        arms = sub.groupby("treatment")["tech_block"].mean()
+        at_tp = wide[wide["timepoint"] == tp]
+        arms = at_tp.groupby("treatment")["tech_block"].mean()
         if len(arms) == 2 and abs(arms.diff().iloc[-1]) >= 0.5:
             bad_tp.add(tp)
         # Acquisition settings that differ between the two arms are on their own
         # enough to sink the comparison, however the QC block came out.
-        if "flowrate" in sub.columns and sub["flowrate"].notna().any():
-            byarm = sub.groupby("treatment")["flowrate"].apply(lambda v: set(v.dropna()))
+        if "flowrate" in at_tp.columns and at_tp["flowrate"].notna().any():
+            byarm = at_tp.groupby("treatment")["flowrate"].apply(lambda v: set(v.dropna()))
             if len(byarm) == 2 and byarm.iloc[0] != byarm.iloc[1]:
                 bad_tp.add(tp)
     print(f"\nTimepoints unusable for drug-vs-vehicle (arms differ on quality): "
           f"{sorted(bad_tp) or 'none'}")
+    every = specs["bcell"] + specs["tcell"] + specs["myeloid"] + specs["mfi"]
+    by_label = {l: (l, k, d) for l, k, d in every}
+
+    fam_dir = outdir / "families"
+    fam_dir.mkdir(parents=True, exist_ok=True)
+    placed = set()
+    for fam, labels in FAMILIES.items():
+        chosen = [by_label[l] for l in labels if l in by_label]
+        if not chosen:
+            continue
+        placed.update(l for l, _k, _d in chosen)
+        plot_grid(sub, chosen, fam_dir / f"{_slug(fam)}.png", fam + tag,
+                  ncols=min(3, len(chosen)), dark=ns.dark, notes=notes,
+                  drug_only=ns.drug_only)
+
+    ind_dir = outdir / "individual"
+    ind_dir.mkdir(parents=True, exist_ok=True)
+    for label, key, denom in every:
+        plot_single(sub, label, key, denom, ind_dir / f"{_slug(label)}.png",
+                    dark=ns.dark, drug_only=ns.drug_only)
+    leftover = [l for l, _k, _d in every if l not in placed]
+    if leftover:
+        print(f"Not in any family, single figures only: {[_plain(l) for l in leftover]}")
+    print(f"Figures: {len(FAMILIES)} family plots in {fam_dir}/, "
+          f"{len(every)} single plots in {ind_dir}/")
+
+    export_prism(wide, every, outdir)
+
     plot_contrast(wide, specs["bcell"] + specs["tcell"] + specs["myeloid"],
                   outdir / "flow_contrast.png", dark=ns.dark, confounded=bad_tp)
     print(f"\nSaved figures to {outdir}/ (flow_tcell, flow_myeloid, flow_qc_live, "
