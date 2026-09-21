@@ -33,6 +33,7 @@ import pandas as pd
 from scipy import stats
 
 import sci_cohorts as sc
+import plot_b1a_splenocytes as b1a
 
 DEFAULT_COUNTS = Path("data/sci_flow_counts.csv")
 DEFAULT_META = Path("data/sci_flow_samples.csv")
@@ -71,6 +72,29 @@ M_PANELS = [
     ("M1-like (red pulp)", f"{RPM}/M1 Like", RPM, "% of red pulp macs"),
     ("M2-like (red pulp)", f"{RPM}/M2 Like", RPM, "% of red pulp macs"),
 ]
+
+# The B cell panel is a separate stain on the same animals, merged by animal ID.
+B1A_PANELS = [
+    ("B-1a  (IgM$^+$)", "b1a_igm_pos", "% of B cells  ·  B cell panel"),
+    ("IgM$^-$", "b1a_igm_neg", "% of B cells  ·  B cell panel"),
+]
+
+
+def add_b1a(wide: pd.DataFrame) -> list:
+    """Merge the B cell panel in by animal, and report any coverage mismatch.
+
+    Its own exclusion (489) already matches this panel's; 497 differs but is
+    uninjured, so the two sets coincide for a drug-vs-vehicle read.
+    """
+    src = b1a.build_frame().set_index("animal")
+    keep = src[~src["excluded"]]
+    wide["b1a_igm_pos"] = wide["animal"].map(keep["igm_pos_pct"])
+    wide["b1a_igm_neg"] = wide["animal"].map(keep["igm_neg_pct"])
+    missing = sorted(int(a) for a in wide.loc[wide["b1a_igm_pos"].isna(), "animal"])
+    if missing:
+        print(f"No B cell panel data for: {missing}")
+    return B1A_PANELS
+
 
 # A frequency computed from a handful of events is noise, not a measurement.
 MIN_NUMERATOR = 20
@@ -437,8 +461,11 @@ def plot_contrast(data: pd.DataFrame, panels: list, out_path: Path, dark: bool =
             veh = sc.group_values(data, tp, "Vehicle", key)
             nm = sc.group_values(data, tp, "NM72", key)
             g, lo, hi = _hedges_g(veh, nm)
+            pval = (stats.ttest_ind(veh, nm, equal_var=False)[1]
+                    if veh.size > 1 and nm.size > 1 else np.nan)
             rows.append({"label": label, "tp": tp, "g": g, "lo": lo, "hi": hi,
-                         "n": f"{veh.size}v{nm.size}"})
+                         "p": pval, "n": f"{veh.size}v{nm.size}",
+                         "bcell": label in {l for l, _k, _d in B1A_PANELS}})
     df = pd.DataFrame(rows).dropna(subset=["g"])
     labels = [l for l, _k, _d in panels if l in set(df["label"])]
 
@@ -454,13 +481,17 @@ def plot_contrast(data: pd.DataFrame, panels: list, out_path: Path, dark: bool =
             if lab not in sub.index:
                 continue
             r = sub.loc[lab]
-            hue = c["text_muted"] if bad else (c["NM72"] if r["g"] > 0 else c["Vehicle"])
+            dim = bad and not r["bcell"]
+            hue = c["text_muted"] if dim else (c["NM72"] if r["g"] > 0 else c["Vehicle"])
             ax.plot([r["lo"], r["hi"]], [yi, yi], color=hue, linewidth=2.0,
-                    alpha=0.45 if bad else 0.9, zorder=2)
+                    alpha=0.45 if dim else 0.9, zorder=2)
             ax.scatter(r["g"], yi, s=70, facecolor=hue, edgecolor=c["surface"],
-                       linewidth=1.3, alpha=0.5 if bad else 1.0, zorder=3)
-            ax.text(1.01, yi, r["n"], transform=ax.get_yaxis_transform(),
-                    va="center", ha="left", fontsize=7.5, color=c["text_muted"])
+                       linewidth=1.3, alpha=0.5 if dim else 1.0, zorder=3)
+            sig = "" if (np.isnan(r["p"]) or r["p"] >= 0.05) else f"  p={r['p']:.3f}"
+            ax.text(1.01, yi, r["n"] + sig, transform=ax.get_yaxis_transform(),
+                    va="center", ha="left", fontsize=7.5,
+                    color=c["flag"] if sig else c["text_muted"],
+                    fontweight="bold" if sig else "normal")
         ax.set_yticks(y)
         ax.set_yticklabels(labels, fontsize=9, color=c["text_secondary"])
         ax.invert_yaxis()
@@ -472,16 +503,20 @@ def plot_contrast(data: pd.DataFrame, panels: list, out_path: Path, dark: bool =
         ax.tick_params(colors=c["text_secondary"], length=4, width=0.8, labelsize=9)
         ax.set_xlabel("← favours vehicle      Hedges' g      favours NM72 →",
                       color=c["text_secondary"], fontsize=9)
-        ax.set_title(f"{tp}" + ("   ·  CONFOUNDED, do not interpret" if bad else
-                                "   ·  quality-balanced"),
+        ax.set_title(f"{tp}" + ("   ·  grey = confounded" if bad else "   ·  quality-balanced"),
                      fontsize=11, fontweight="bold", loc="left", pad=8,
                      color=c["flag"] if bad else c["text"])
 
     fig.suptitle("NM72 vs vehicle, by population", fontsize=13, fontweight="bold",
                  color=c["text"], x=0.045, ha="left", y=0.995)
+    nsig = int((df["p"] < 0.05).sum())
+    tail = (f"{nsig} population(s) reach Welch p<0.05, flagged at right; the g interval "
+            "uses a pooled SD and can be wider than the Welch test it sits beside"
+            if nsig else "no population reaches Welch p<0.05")
     fig.text(0.045, 0.012,
-             "Hedges' g with 95% CI  ·  n per group shown at right (vehicle v NM72)  ·  "
-             "at n=3-4 every interval crosses zero; none of these is a positive result",
+             "Hedges' g with 95% CI  ·  n per group at right (vehicle v NM72)  ·  " + tail
+             + "  ·  grey = T cell / myeloid QC cluster; the B cell panel is a separate "
+               "stain and is never greyed",
              fontsize=8, color=c["text_muted"], ha="left")
     fig.tight_layout(rect=[0.005, 0.045, 1, 0.94])
     fig.savefig(out_path, bbox_inches="tight", facecolor=c["surface"], dpi=200)
@@ -607,6 +642,8 @@ def main(argv: list[str] | None = None) -> int:
         specs[kind] = built
 
     # CD4:CD8 is denominator-free, so it survives a shift in total T cell number.
+    specs["bcell"] = add_b1a(wide)
+
     wide["pct::CD4:CD8 ratio"] = (wide[CD4].astype(float)
                                   / wide[f"{CD3}/CD8+"].astype(float).where(
                                       wide[f"{CD3}/CD8+"].astype(float) > 0))
@@ -661,6 +698,11 @@ def main(argv: list[str] | None = None) -> int:
     plot_grid(sub, specs["myeloid"], outdir / f"flow_myeloid{suffix}.png",
               "Splenic myeloid populations after SCI" + tag, ncols=4, dark=ns.dark,
               notes=notes, drug_only=ns.drug_only)
+    plot_grid(sub, specs["bcell"] + specs["tcell"] + specs["myeloid"],
+              outdir / f"flow_all{suffix}.png",
+              "Splenic populations after SCI, both panels" + tag, ncols=5, dark=ns.dark,
+              notes=notes + ["B-1a / IgM- are a separate stain, merged by animal"],
+              drug_only=ns.drug_only)
     plot_qc(qc_frame, ns.min_live, outdir / "flow_qc_live.png", dark=ns.dark)
     if wide["btim"].notna().any():
         plot_acquisition_qc(wide, outdir / "flow_qc_runorder.png", dark=ns.dark)
@@ -681,7 +723,7 @@ def main(argv: list[str] | None = None) -> int:
                 bad_tp.add(tp)
     print(f"\nTimepoints unusable for drug-vs-vehicle (arms differ on quality): "
           f"{sorted(bad_tp) or 'none'}")
-    plot_contrast(wide, specs["tcell"] + specs["myeloid"],
+    plot_contrast(wide, specs["bcell"] + specs["tcell"] + specs["myeloid"],
                   outdir / "flow_contrast.png", dark=ns.dark, confounded=bad_tp)
     print(f"\nSaved figures to {outdir}/ (flow_tcell, flow_myeloid, flow_qc_live, "
           f"flow_qc_runorder) and 3 CSVs")
