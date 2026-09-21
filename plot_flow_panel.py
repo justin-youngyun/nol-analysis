@@ -402,6 +402,89 @@ def plot_acquisition_qc(wide: pd.DataFrame, out_path: Path, dark: bool = False) 
 
 # ---------------------------------------------------------------------------
 
+def _hedges_g(a: np.ndarray, b: np.ndarray) -> tuple[float, float, float]:
+    """Standardised NM72-minus-vehicle difference with a 95% interval.
+
+    Effect size rather than raw units so populations on different denominators
+    sit on one axis. At n=3-4 the interval is wide by construction; that width
+    is the point, not a defect to hide.
+    """
+    na, nb = a.size, b.size
+    if na < 2 or nb < 2:
+        return np.nan, np.nan, np.nan
+    sp = np.sqrt(((na - 1) * np.var(a, ddof=1) + (nb - 1) * np.var(b, ddof=1)) / (na + nb - 2))
+    if sp == 0:
+        return np.nan, np.nan, np.nan
+    d = (np.mean(b) - np.mean(a)) / sp
+    g = d * (1 - 3 / (4 * (na + nb) - 9))          # small-sample correction
+    se = np.sqrt((na + nb) / (na * nb) + g ** 2 / (2 * (na + nb - 2)))
+    t = stats.t.ppf(0.975, na + nb - 2)
+    return g, g - t * se, g + t * se
+
+
+def plot_contrast(data: pd.DataFrame, panels: list, out_path: Path, dark: bool = False,
+                  confounded: set[str] | None = None) -> Path:
+    """NM72 minus vehicle, per population, at each timepoint."""
+    c = sc.palette(dark)
+    confounded = confounded or set()
+    rows = []
+    for label, key, _dl in panels:
+        for tp in ("6 h", "24 h"):
+            veh = sc.group_values(data, tp, "Vehicle", key)
+            nm = sc.group_values(data, tp, "NM72", key)
+            g, lo, hi = _hedges_g(veh, nm)
+            rows.append({"label": label, "tp": tp, "g": g, "lo": lo, "hi": hi,
+                         "n": f"{veh.size}v{nm.size}"})
+    df = pd.DataFrame(rows).dropna(subset=["g"])
+    labels = [l for l, _k, _d in panels if l in set(df["label"])]
+
+    fig, axes = plt.subplots(1, 2, figsize=(12.5, 0.42 * len(labels) + 3.0),
+                             sharey=True, facecolor=c["surface"])
+    for ax, tp in zip(axes, ("6 h", "24 h")):
+        ax.set_facecolor(c["surface"])
+        bad = tp in confounded
+        sub = df[df.tp == tp].set_index("label")
+        y = np.arange(len(labels))
+        ax.axvline(0, color=c["text_muted"], linewidth=1.0, zorder=1)
+        for yi, lab in zip(y, labels):
+            if lab not in sub.index:
+                continue
+            r = sub.loc[lab]
+            hue = c["text_muted"] if bad else (c["NM72"] if r["g"] > 0 else c["Vehicle"])
+            ax.plot([r["lo"], r["hi"]], [yi, yi], color=hue, linewidth=2.0,
+                    alpha=0.45 if bad else 0.9, zorder=2)
+            ax.scatter(r["g"], yi, s=70, facecolor=hue, edgecolor=c["surface"],
+                       linewidth=1.3, alpha=0.5 if bad else 1.0, zorder=3)
+            ax.text(1.01, yi, r["n"], transform=ax.get_yaxis_transform(),
+                    va="center", ha="left", fontsize=7.5, color=c["text_muted"])
+        ax.set_yticks(y)
+        ax.set_yticklabels(labels, fontsize=9, color=c["text_secondary"])
+        ax.invert_yaxis()
+        ax.xaxis.grid(True, color=c["grid"], linewidth=0.8)
+        ax.set_axisbelow(True)
+        for side in ("top", "right", "left"):
+            ax.spines[side].set_visible(False)
+        ax.spines["bottom"].set_color(c["grid"])
+        ax.tick_params(colors=c["text_secondary"], length=4, width=0.8, labelsize=9)
+        ax.set_xlabel("← favours vehicle      Hedges' g      favours NM72 →",
+                      color=c["text_secondary"], fontsize=9)
+        ax.set_title(f"{tp}" + ("   ·  CONFOUNDED, do not interpret" if bad else
+                                "   ·  quality-balanced"),
+                     fontsize=11, fontweight="bold", loc="left", pad=8,
+                     color=c["flag"] if bad else c["text"])
+
+    fig.suptitle("NM72 vs vehicle, by population", fontsize=13, fontweight="bold",
+                 color=c["text"], x=0.045, ha="left", y=0.995)
+    fig.text(0.045, 0.012,
+             "Hedges' g with 95% CI  ·  n per group shown at right (vehicle v NM72)  ·  "
+             "at n=3-4 every interval crosses zero; none of these is a positive result",
+             fontsize=8, color=c["text_muted"], ha="left")
+    fig.tight_layout(rect=[0.005, 0.045, 1, 0.94])
+    fig.savefig(out_path, bbox_inches="tight", facecolor=c["surface"], dpi=200)
+    plt.close(fig)
+    return out_path
+
+
 def summarize(data: pd.DataFrame, key: str, label: str) -> pd.DataFrame:
     rows = []
     for tp, tr, _x in sc.GROUPS:
@@ -569,6 +652,25 @@ def main(argv: list[str] | None = None) -> int:
     plot_qc(qc_frame, ns.min_live, outdir / "flow_qc_live.png", dark=ns.dark)
     if wide["btim"].notna().any():
         plot_acquisition_qc(wide, outdir / "flow_qc_runorder.png", dark=ns.dark)
+
+    # Which timepoints are safe for a drug-vs-vehicle read: a timepoint whose two
+    # arms differ on sample quality cannot separate drug from prep.
+    bad_tp = set()
+    for tp in ("6 h", "24 h"):
+        sub = wide[wide["timepoint"] == tp]
+        arms = sub.groupby("treatment")["tech_block"].mean()
+        if len(arms) == 2 and abs(arms.diff().iloc[-1]) >= 0.5:
+            bad_tp.add(tp)
+        # Acquisition settings that differ between the two arms are on their own
+        # enough to sink the comparison, however the QC block came out.
+        if "flowrate" in sub.columns and sub["flowrate"].notna().any():
+            byarm = sub.groupby("treatment")["flowrate"].apply(lambda v: set(v.dropna()))
+            if len(byarm) == 2 and byarm.iloc[0] != byarm.iloc[1]:
+                bad_tp.add(tp)
+    print(f"\nTimepoints unusable for drug-vs-vehicle (arms differ on quality): "
+          f"{sorted(bad_tp) or 'none'}")
+    plot_contrast(wide, specs["tcell"] + specs["myeloid"],
+                  outdir / "flow_contrast.png", dark=ns.dark, confounded=bad_tp)
     print(f"\nSaved figures to {outdir}/ (flow_tcell, flow_myeloid, flow_qc_live, "
           f"flow_qc_runorder) and 3 CSVs")
     return 0
