@@ -98,6 +98,18 @@ def add_b1a(wide: pd.DataFrame) -> list:
     return B1A_PANELS
 
 
+# Every comparison worth reporting, tagged by what it asks.
+CONTRAST_SET = [
+    ("Uninjured", "Uninjured", "6 h", "Vehicle", "injury"),
+    ("Uninjured", "Uninjured", "6 h", "NM72", "injury"),
+    ("Uninjured", "Uninjured", "24 h", "Vehicle", "injury"),
+    ("Uninjured", "Uninjured", "24 h", "NM72", "injury"),
+    ("6 h", "Vehicle", "24 h", "Vehicle", "time"),
+    ("6 h", "NM72", "24 h", "NM72", "time"),
+    ("6 h", "Vehicle", "6 h", "NM72", "drug"),
+    ("24 h", "Vehicle", "24 h", "NM72", "drug"),
+]
+
 # Populations that belong on one graph together. Anything not named here still
 # gets its own single-population figure.
 FAMILIES: dict[str, list[str]] = {
@@ -668,26 +680,41 @@ def export_prism(data: pd.DataFrame, panels: list, outdir: Path) -> None:
         pd.DataFrame({k: v + [np.nan] * (width - len(v)) for k, v in wide_cols.items()}).to_csv(
             pdir / "per_graph" / f"{_slug(label)}.csv", index=False)
 
-        for tp in ("6 h", "24 h"):
-            veh = sc.group_values(data, tp, "Vehicle", key)
-            nm = sc.group_values(data, tp, "NM72", key)
-            if veh.size < 2 or nm.size < 2:
+        # Both kinds of comparison, not only the drug one: the injury and time
+        # contrasts are where the neutrophil result lives, and leaving them out
+        # made "nothing but B-1a is significant" read as broader than it was.
+        for (tp1, tr1, tp2, tr2, kind) in CONTRAST_SET:
+            a = sc.group_values(data, tp1, tr1, key)
+            b = sc.group_values(data, tp2, tr2, key)
+            if a.size < 2 or b.size < 2:
                 continue
-            t, pv = stats.ttest_ind(veh, nm, equal_var=False)
-            g, lo, hi = _hedges_g(veh, nm)
-            contrast_rows.append({"population": plain, "timepoint": tp,
-                                  "n_vehicle": veh.size, "n_nm72": nm.size,
-                                  "mean_vehicle": float(np.mean(veh)),
-                                  "mean_nm72": float(np.mean(nm)),
-                                  "ratio_nm72_over_vehicle": float(np.mean(nm) / np.mean(veh))
-                                  if np.mean(veh) else np.nan,
-                                  "welch_t": float(t), "welch_p": float(pv),
-                                  "hedges_g": g, "g_ci_low": lo, "g_ci_high": hi})
+            t, pv = stats.ttest_ind(a, b, equal_var=False)
+            g, lo, hi = _hedges_g(a, b)
+            contrast_rows.append({
+                "population": plain, "kind": kind,
+                "group_a": f"{tp1} {tr1}".replace("Uninjured Uninjured", "Uninjured"),
+                "group_b": f"{tp2} {tr2}".replace("Uninjured Uninjured", "Uninjured"),
+                "n_a": a.size, "n_b": b.size,
+                "mean_a": float(np.mean(a)), "mean_b": float(np.mean(b)),
+                "ratio_b_over_a": float(np.mean(b) / np.mean(a)) if np.mean(a) else np.nan,
+                "welch_t": float(t), "welch_p": float(pv),
+                "hedges_g": g, "g_ci_low": lo, "g_ci_high": hi})
 
     pd.DataFrame(long_rows).to_csv(pdir / "per_animal_long.csv", index=False)
     pd.DataFrame(summary_rows).to_csv(pdir / "group_summary.csv", index=False)
-    pd.DataFrame(contrast_rows).sort_values(["timepoint", "welch_p"]).to_csv(
-        pdir / "contrasts_vehicle_vs_nm72.csv", index=False)
+    con = pd.DataFrame(contrast_rows).sort_values(["kind", "welch_p"])
+    # Benjamini-Hochberg within each family of comparisons, since this is a wide
+    # screen: a raw p near 0.05 among dozens of tests is not one result in twenty.
+    con["bh_q"] = np.nan
+    for kind, grp in con.groupby("kind"):
+        pv = grp["welch_p"].to_numpy()
+        order = np.argsort(pv)
+        m = len(pv)
+        q = np.empty(m)
+        q[order] = np.minimum.accumulate((pv[order] * m / np.arange(1, m + 1))[::-1])[::-1]
+        con.loc[grp.index, "bh_q"] = np.clip(q, 0, 1)
+    con.to_csv(pdir / "contrasts_all.csv", index=False)
+    con[con["kind"] == "drug"].to_csv(pdir / "contrasts_vehicle_vs_nm72.csv", index=False)
     print(f"Prism bundle: {pdir}/ "
           f"(per_animal_long, group_summary, contrasts, per_graph/*.csv)")
 
@@ -781,9 +808,9 @@ def main(argv: list[str] | None = None) -> int:
     print(f"\nExcluded at --min-live {ns.min_live:,}: "
           f"{', '.join(str(int(a)) for a in failed['animal']) or 'none'}")
     qc_frame = wide.copy()
-    wide = wide[wide[LIVE] >= ns.min_live].copy()
+    wide["live_ok"] = wide[LIVE] >= ns.min_live
 
-    wide["tech_block"] = detect_outlier_block(wide)
+    wide["tech_block"] = detect_outlier_block(wide[wide["live_ok"]]).reindex(wide.index, fill_value=False)
     block = wide[wide["tech_block"]]
     confound = ""
     if len(block):
@@ -816,6 +843,8 @@ def main(argv: list[str] | None = None) -> int:
         specs[kind] = built
 
     # CD4:CD8 is denominator-free, so it survives a shift in total T cell number.
+    for _key in [c for c in wide.columns if c.startswith("pct::")]:
+        wide.loc[~wide["live_ok"], _key] = np.nan
     specs["bcell"] = add_b1a(wide)
 
     # Non-frequency statistics, when the workspace carries any.
@@ -829,6 +858,7 @@ def main(argv: list[str] | None = None) -> int:
             # its name, and resolve_duplicates has already picked which id wins
             lookup = grp.drop_duplicates("sampleID").set_index("sampleID")["value"]
             wide[key] = wide["sampleID"].map(lookup)
+            wide.loc[~wide["live_ok"], key] = np.nan
             if path in wide.columns:
                 wide[key + "__n"] = wide[path].astype(float)
             got = int(wide[key].notna().sum())
@@ -840,6 +870,7 @@ def main(argv: list[str] | None = None) -> int:
     wide["pct::CD4:CD8 ratio"] = (wide[CD4].astype(float)
                                   / wide[f"{CD3}/CD8+"].astype(float).where(
                                       wide[f"{CD3}/CD8+"].astype(float) > 0))
+    wide.loc[~wide["live_ok"], "pct::CD4:CD8 ratio"] = np.nan
     specs["tcell"].append(("CD4:CD8 ratio", "pct::CD4:CD8 ratio", "ratio of counts"))
 
     outdir = Path(ns.outdir)
@@ -904,7 +935,7 @@ def main(argv: list[str] | None = None) -> int:
     # arms differ on sample quality cannot separate drug from prep.
     bad_tp = set()
     for tp in ("6 h", "24 h"):
-        at_tp = wide[wide["timepoint"] == tp]
+        at_tp = wide[wide["live_ok"] & (wide["timepoint"] == tp)]
         arms = at_tp.groupby("treatment")["tech_block"].mean()
         if len(arms) == 2 and abs(arms.diff().iloc[-1]) >= 0.5:
             bad_tp.add(tp)
