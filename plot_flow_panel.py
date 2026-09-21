@@ -229,8 +229,12 @@ def _footnote(fig, c, notes: list[str]) -> None:
 
 
 def plot_grid(data: pd.DataFrame, panels: list, out_path: Path, title: str,
-              ncols: int, dark: bool = False, notes: list[str] | None = None) -> Path:
+              ncols: int, dark: bool = False, notes: list[str] | None = None,
+              drug_only: bool = False) -> Path:
     c = sc.palette(dark)
+    gkw = dict(groups=sc.DRUG_GROUPS, brackets=sc.DRUG_BRACKETS, ticks=sc.DRUG_TICKS,
+               baseline=False) if drug_only else {}
+    treatments = ("Vehicle", "NM72") if drug_only else ("Uninjured", "Vehicle", "NM72")
     nrows = int(np.ceil(len(panels) / ncols))
     fig, axes = plt.subplots(nrows, ncols, figsize=(3.55 * ncols, 3.15 * nrows),
                              facecolor=c["surface"], squeeze=False)
@@ -247,11 +251,11 @@ def plot_grid(data: pd.DataFrame, panels: list, out_path: Path, title: str,
                       compact=True, show_ticklabels=bottom, show_brackets=bottom,
                       show_n=True,
                       title_color=c["flag"] if thin else None,
-                      subtitle_color=c["flag"] if thin else None)
+                      subtitle_color=c["flag"] if thin else None, **gkw)
     for ax in flat[len(panels):]:
         ax.set_visible(False)
 
-    leg = fig.legend(handles=sc.legend_handles(c), loc="upper right", frameon=False,
+    leg = fig.legend(handles=sc.legend_handles(c, treatments), loc="upper right", frameon=False,
                      fontsize=9.5, ncol=3, bbox_to_anchor=(0.995, 0.995),
                      handletextpad=0.4, columnspacing=1.4)
     for t in leg.get_texts():
@@ -522,6 +526,8 @@ def main(argv: list[str] | None = None) -> int:
                    help="Drop animals with fewer live leukocyte events than this.")
     p.add_argument("--outdir", default="outputs")
     p.add_argument("--dark", action="store_true")
+    p.add_argument("--drug-only", action="store_true",
+                   help="Drop the uninjured group: vehicle vs NM72 alone.")
     ns = p.parse_args(argv if argv is not None else sys.argv[1:])
 
     counts_path = Path(ns.counts)
@@ -639,16 +645,22 @@ def main(argv: list[str] | None = None) -> int:
 
     excluded_note = (", ".join(str(int(a)) for a in failed["animal"]) or "none")
     notes = [f"excluded: {excluded_note} (<{ns.min_live:,} live leukocytes)",
-             "shaded band = uninjured mean ± SEM",
              "panels have independent y-scales",
              f"frequencies blanked below {MIN_NUMERATOR} numerator events"]
+    if not ns.drug_only:
+        notes.insert(1, "shaded band = uninjured mean ± SEM")
     if confound:
         notes.insert(0, "SEE QC FIGURE: " + confound)
 
-    plot_grid(wide, specs["tcell"], outdir / "flow_tcell.png",
-              "Splenic T cell populations after SCI", ncols=3, dark=ns.dark, notes=notes)
-    plot_grid(wide, specs["myeloid"], outdir / "flow_myeloid.png",
-              "Splenic myeloid populations after SCI", ncols=4, dark=ns.dark, notes=notes)
+    suffix = "_drug" if ns.drug_only else ""
+    sub = wide[wide["treatment"] != "Uninjured"] if ns.drug_only else wide
+    tag = "  ·  NM72 vs vehicle" if ns.drug_only else ""
+    plot_grid(sub, specs["tcell"], outdir / f"flow_tcell{suffix}.png",
+              "Splenic T cell populations after SCI" + tag, ncols=3, dark=ns.dark,
+              notes=notes, drug_only=ns.drug_only)
+    plot_grid(sub, specs["myeloid"], outdir / f"flow_myeloid{suffix}.png",
+              "Splenic myeloid populations after SCI" + tag, ncols=4, dark=ns.dark,
+              notes=notes, drug_only=ns.drug_only)
     plot_qc(qc_frame, ns.min_live, outdir / "flow_qc_live.png", dark=ns.dark)
     if wide["btim"].notna().any():
         plot_acquisition_qc(wide, outdir / "flow_qc_runorder.png", dark=ns.dark)

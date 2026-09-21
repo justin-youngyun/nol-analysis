@@ -51,6 +51,16 @@ BRACKETS = {"6 h": (1.35, 2.15), "24 h": (3.50, 4.30)}
 
 SHORT_TICKS = ["Un", "Veh", "NM72", "Veh", "NM72"]
 
+# Uninjured dropped: the drug-vs-vehicle contrast on its own.
+DRUG_GROUPS: list[tuple[str, str, float]] = [
+    ("6 h", "Vehicle", 0.00),
+    ("6 h", "NM72", 0.80),
+    ("24 h", "Vehicle", 2.10),
+    ("24 h", "NM72", 2.90),
+]
+DRUG_BRACKETS = {"6 h": (0.00, 0.80), "24 h": (2.10, 2.90)}
+DRUG_TICKS = ["Veh", "NM72", "Veh", "NM72"]
+
 # ---------------------------------------------------------------------------
 # Palette. Categorical slots 1 and 2 carry treatment identity; uninjured is
 # context, so it takes the de-emphasis gray. Both modes are stepped for their
@@ -111,11 +121,11 @@ def group_values(data: pd.DataFrame, timepoint: str, treatment: str, col: str) -
     return v[~np.isnan(v)]
 
 
-def legend_handles(c: dict) -> list:
+def legend_handles(c: dict, treatments: tuple[str, ...] = ("Uninjured", "Vehicle", "NM72")) -> list:
     return [
         plt.Line2D([], [], marker="o", linestyle="", markersize=8, markerfacecolor=c[t],
                    markeredgecolor=c["surface"], markeredgewidth=1.2, label=t)
-        for t in ("Uninjured", "Vehicle", "NM72")
+        for t in treatments
     ]
 
 
@@ -125,8 +135,12 @@ def draw_panel(ax, data: pd.DataFrame, col: str, c: dict, *, ylabel: str | None 
                show_brackets: bool = True, show_legend: bool = False,
                show_n: bool = True, baseline: bool = True,
                headroom: float = 1.30, title_color: str | None = None,
-               subtitle_color: str | None = None) -> None:
-    """One measure, five groups: individual points over a mean crossbar with SEM."""
+               subtitle_color: str | None = None,
+               groups: list | None = None, brackets: dict | None = None,
+               ticks: list | None = None) -> None:
+    """One measure per group: individual points over a mean crossbar with SEM."""
+    groups = groups if groups is not None else GROUPS
+    brackets = brackets if brackets is not None else BRACKETS
     ax.set_facecolor(c["surface"])
 
     if baseline:
@@ -143,7 +157,7 @@ def draw_panel(ax, data: pd.DataFrame, col: str, c: dict, *, ylabel: str | None 
     top = (ymax * headroom) or 1.0
 
     marker = 42 if compact else 62
-    for timepoint, treatment, x in GROUPS:
+    for timepoint, treatment, x in groups:
         vals = group_values(data, timepoint, treatment, col)
         if vals.size == 0:
             continue
@@ -158,11 +172,14 @@ def draw_panel(ax, data: pd.DataFrame, col: str, c: dict, *, ylabel: str | None 
             ax.text(x, top * 0.03, f"n={vals.size}", ha="center", va="bottom",
                     fontsize=7.5 if compact else 8.5, color=c["text_muted"])
 
-    ax.set_xlim(-0.75, 5.05)
+    xs = [x for _tp, _tr, x in groups]
+    pad = 0.75 if len(groups) > 4 else 0.62
+    ax.set_xlim(min(xs) - pad, max(xs) + pad)
     ax.set_ylim(0, top)
-    ax.set_xticks([x for _tp, _tr, x in GROUPS])
+    ax.set_xticks(xs)
     if show_ticklabels:
-        labels = SHORT_TICKS if compact else [tr for _tp, tr, _x in GROUPS]
+        default_ticks = ticks if ticks is not None else SHORT_TICKS
+        labels = default_ticks if compact else [tr for _tp, tr, _x in groups]
         ax.set_xticklabels(labels, color=c["text_secondary"],
                            fontsize=8.5 if compact else 10)
     else:
@@ -179,7 +196,7 @@ def draw_panel(ax, data: pd.DataFrame, col: str, c: dict, *, ylabel: str | None 
                    labelsize=8.5 if compact else 10)
 
     if show_brackets:
-        for timepoint, (lo, hi) in BRACKETS.items():
+        for timepoint, (lo, hi) in brackets.items():
             ax.annotate("", xy=(lo, -0.105), xytext=(hi, -0.105),
                         xycoords=("data", "axes fraction"),
                         textcoords=("data", "axes fraction"),
