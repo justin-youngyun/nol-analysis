@@ -32,6 +32,8 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 
+import sci_cohorts as sc
+
 # ---------------------------------------------------------------------------
 # Data, transcribed from the cohort sheet and the FlowJo tables
 # ---------------------------------------------------------------------------
@@ -95,46 +97,9 @@ MEASURES: dict[str, dict] = {
 
 FLOWJO_N = 19
 
-# Group order along x, with the spacing that separates the timepoint blocks.
-GROUPS: list[tuple[str, str, float]] = [
-    ("Uninjured", "Uninjured", 0.00),
-    ("6 h", "Vehicle", 1.35),
-    ("6 h", "NM72", 2.15),
-    ("24 h", "Vehicle", 3.50),
-    ("24 h", "NM72", 4.30),
-]
-
-BRACKETS = {"6 h": (1.35, 2.15), "24 h": (3.50, 4.30)}
-
-# ---------------------------------------------------------------------------
-# Palette. Categorical slots 1 and 2 carry treatment identity; uninjured is
-# context, so it takes the de-emphasis gray. Both modes are stepped for their
-# own surface rather than flipped.
-# ---------------------------------------------------------------------------
-
-LIGHT = {
-    "surface": "#ffffff",
-    "text": "#0b0b0b",
-    "text_secondary": "#52514e",
-    "text_muted": "#7a7973",
-    "grid": "#e6e5e1",
-    "Uninjured": "#84837c",
-    "Vehicle": "#2a78d6",
-    "NM72": "#eb6834",
-    "band": "#84837c",
-}
-
-DARK = {
-    "surface": "#1a1a19",
-    "text": "#ffffff",
-    "text_secondary": "#c3c2b7",
-    "text_muted": "#97968c",
-    "grid": "#343431",
-    "Uninjured": "#97968c",
-    "Vehicle": "#3987e5",
-    "NM72": "#d95926",
-    "band": "#97968c",
-}
+GROUPS = sc.GROUPS
+BRACKETS = sc.BRACKETS
+LIGHT, DARK = sc.LIGHT, sc.DARK
 
 
 def build_frame() -> pd.DataFrame:
@@ -172,22 +137,9 @@ def analysis_set(df: pd.DataFrame) -> pd.DataFrame:
     return df[df["acquired"] & ~df["excluded"]].copy()
 
 
-def _jitter(n: int, width: float = 0.13) -> np.ndarray:
-    if n <= 1:
-        return np.zeros(max(n, 0))
-    return np.linspace(-width, width, n)
-
-
-def _mean_sem(vals: np.ndarray) -> tuple[float, float]:
-    mean = float(np.mean(vals))
-    sem = float(np.std(vals, ddof=1) / np.sqrt(vals.size)) if vals.size > 1 else 0.0
-    return mean, sem
-
-
-def _group_values(data: pd.DataFrame, timepoint: str, treatment: str, col: str) -> np.ndarray:
-    return data.loc[
-        (data["timepoint"] == timepoint) & (data["treatment"] == treatment), col
-    ].to_numpy(dtype=float)
+_jitter = sc.jitter
+_mean_sem = sc.mean_sem
+_group_values = sc.group_values
 
 
 def summarize(data: pd.DataFrame, measure: str) -> pd.DataFrame:

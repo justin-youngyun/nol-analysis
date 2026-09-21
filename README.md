@@ -95,11 +95,48 @@ FlowJo export. On startup the script re-derives the mean and SD of each column o
 acquired sample and compares them against that table's own footer, so a mistyped value
 shows up as a warning rather than as a quietly wrong figure.
 
+## FlowJo T cell / myeloid panel
+
+`plot_flow_panel.py` reads a FlowJo workspace directly. The workspace caches an event
+count on every gate node, so the whole hierarchy comes out without the `.fcs` files:
+
+```
+python3 plot_flow_panel.py --wsp "260916 SCI T Cell (Ly6G fixed).wsp"
+python3 plot_flow_panel.py          # rebuild from the cached counts in data/
+```
+
+Counts and per-sample acquisition metadata are cached under `data/`, so the figures
+rebuild without the workspace. Two things worth knowing about the format:
+
+- FlowJo hangs boolean-NOT gates off `NotNode` rather than `Population`. The whole
+  myeloid branch here sits under a `CD3+-` NotNode, so a parser that only walks
+  `Population` silently drops it.
+- A sample can appear twice; the entry with more live leukocyte events is kept.
+
+Exclusions are judged on the live leukocyte gate via `--min-live` (default 1000).
+Frequencies computed from fewer than 20 numerator events are blanked rather than
+plotted, and any panel that loses more than a third of its animals that way is drawn
+with a red title.
+
+It also writes two QC figures, which are the point as much as the population plots are:
+
+- `flow_qc_live.png` — live leukocyte yield per animal against the exclusion threshold.
+- `flow_qc_runorder.png` — CD4+CD8 as a share of CD3+, CD3+ of live, and CD4+ of CD3+
+  against the order the tubes were acquired in. CD4 and CD8 should account for most
+  CD3+ events in spleen; where they do not, the CD3 gate is holding something else.
+  The script splits that measure at its largest gap, widens the split to the contiguous
+  acquisition window it covers, and warns on the figure if any cohort group falls
+  entirely inside that window — such a group cannot be compared with one outside it.
+
+## Files
+
 ## Files
 
 - `nol_analysis.py`: the analysis module and CLI entry point
 - `make_nol_figures.py`: draws the summary figure from a per-animal table
 - `generate_synthetic_data.py`: writes the synthetic DeepLabCut tables
 - `plot_b1a_splenocytes.py`: the B-1 cohort figures described above
+- `plot_flow_panel.py`: the T cell / myeloid figures and their QC
+- `sci_cohorts.py`: the cohort split, palette and group-scatter panel both flow scripts share
 
 MIT licensed.
