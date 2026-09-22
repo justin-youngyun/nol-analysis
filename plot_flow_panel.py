@@ -638,6 +638,83 @@ def plot_single(data: pd.DataFrame, label: str, key: str, denom: str, out_path: 
     return out_path
 
 
+def plot_timecourse(data: pd.DataFrame, panels: list, out_path: Path, title: str,
+                    ncols: int, dark: bool = False, notes: list[str] | None = None) -> Path:
+    """Uninjured -> 6 h -> 24 h, one line per arm.
+
+    The question this answers is whether a perturbation at 6 h has come back to
+    the uninjured level by 24 h, so the baseline is drawn as the shared point
+    both arms start from rather than as a separate column.
+    """
+    c = sc.palette(dark)
+    nrows = int(np.ceil(len(panels) / ncols))
+    head = 0.75
+    h_total = 3.15 * nrows + head
+    fig, axes = plt.subplots(nrows, ncols, figsize=(3.55 * ncols, h_total),
+                             facecolor=c["surface"], squeeze=False)
+    flat = axes.flatten()
+    XS = {"Uninjured": 0.0, "6 h": 1.0, "24 h": 2.0}
+
+    for i, (label, key, denom) in enumerate(panels):
+        ax = flat[i]
+        ax.set_facecolor(c["surface"])
+        un = sc.group_values(data, "Uninjured", "Uninjured", key)
+        u_mean, u_sem = sc.mean_sem(un)
+        if un.size:
+            ax.axhspan(u_mean - u_sem, u_mean + u_sem, color=c["band"], alpha=0.13,
+                       zorder=0, linewidth=0)
+            ax.axhline(u_mean, color=c["band"], linewidth=0.9, alpha=0.55, zorder=0)
+            ax.scatter(np.full(un.size, XS["Uninjured"]) + sc.jitter(un.size, 0.06), un,
+                       s=34, facecolor=c["Uninjured"], edgecolor=c["surface"],
+                       linewidth=1.0, zorder=4)
+            ax.errorbar(XS["Uninjured"], u_mean, yerr=u_sem, fmt="o", color=c["Uninjured"],
+                        markersize=7, elinewidth=1.4, capsize=4, zorder=5)
+        for arm, dx in (("Vehicle", -0.06), ("NM72", 0.06)):
+            xs, ms, es = [], [], []
+            for tp in ("6 h", "24 h"):
+                v = sc.group_values(data, tp, arm, key)
+                if v.size == 0:
+                    continue
+                m, sem = sc.mean_sem(v)
+                xs.append(XS[tp] + dx); ms.append(m); es.append(sem)
+                ax.scatter(np.full(v.size, XS[tp] + dx) + sc.jitter(v.size, 0.06), v,
+                           s=34, facecolor=c[arm], alpha=0.85, edgecolor=c["surface"],
+                           linewidth=1.0, zorder=4)
+            if xs:
+                ax.plot(xs, ms, color=c[arm], linewidth=2.0, zorder=3)
+                ax.errorbar(xs, ms, yerr=es, fmt="o", color=c[arm], markersize=7,
+                            elinewidth=1.4, capsize=4, zorder=5)
+        ax.set_xlim(-0.35, 2.35)
+        ax.set_xticks(list(XS.values()))
+        ax.set_xticklabels(["Uninj", "6 h", "24 h"], color=c["text_secondary"], fontsize=9)
+        ax.set_ylim(bottom=0)
+        ax.yaxis.grid(True, color=c["grid"], linewidth=0.8)
+        ax.set_axisbelow(True)
+        for side in ("top", "right"):
+            ax.spines[side].set_visible(False)
+        for side in ("left", "bottom"):
+            ax.spines[side].set_color(c["grid"])
+        ax.tick_params(colors=c["text_secondary"], length=4, width=0.8, labelsize=9)
+        ax.set_title(label, fontsize=9.5, fontweight="bold", color=c["text"], loc="left", pad=16)
+        ax.text(0.0, 1.015, denom, transform=ax.transAxes, fontsize=8,
+                color=c["text_muted"], ha="left", va="bottom")
+    for ax in flat[len(panels):]:
+        ax.set_visible(False)
+
+    leg = fig.legend(handles=sc.legend_handles(c), loc="upper left", frameon=False,
+                     fontsize=9.5, ncol=3, bbox_to_anchor=(0.05, 1 - 0.42 / h_total),
+                     handletextpad=0.4, columnspacing=1.4)
+    for t in leg.get_texts():
+        t.set_color(c["text_secondary"])
+    fig.suptitle(title, fontsize=13, fontweight="bold", color=c["text"],
+                 x=0.05, ha="left", y=1 - 0.10 / h_total)
+    _footnote(fig, c, (notes or []) + ["separate animals per timepoint, not a within-animal trajectory"])
+    fig.tight_layout(rect=[0.005, 0.035, 1, 1 - (head - 0.05) / h_total], h_pad=2.6, w_pad=1.8)
+    fig.savefig(out_path, bbox_inches="tight", facecolor=c["surface"], dpi=200)
+    plt.close(fig)
+    return out_path
+
+
 def export_prism(data: pd.DataFrame, panels: list, outdir: Path) -> None:
     """Per-animal values, group summaries, contrasts, and one table per graph.
 
@@ -972,6 +1049,14 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Not in any family, single figures only: {[_plain(l) for l in leftover]}")
     print(f"Figures: {len(FAMILIES)} family plots in {fam_dir}/, "
           f"{len(every)} single plots in {ind_dir}/")
+
+    tc = [by_label[l] for l in ["Neutrophils", "CD11b$^+$F4/80$^-$", "CD11b$^+$F4/80$^+$",
+                                "Red pulp macrophages", "B-1a  (IgM$^+$)", "IgM$^-$",
+                                "CD3$^+$ T cells", "CD4$^+$", "CD8$^+$"] if l in by_label]
+    if tc and not ns.drug_only:
+        plot_timecourse(wide, tc, outdir / "flow_timecourse.png",
+                        "Time course: uninjured to 6 h to 24 h", ncols=3,
+                        dark=ns.dark, notes=notes)
 
     export_prism(wide, every, outdir)
 
