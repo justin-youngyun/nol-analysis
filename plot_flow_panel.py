@@ -950,7 +950,7 @@ def main(argv: list[str] | None = None) -> int:
     every = specs["bcell"] + specs["tcell"] + specs["myeloid"] + specs["mfi"]
     by_label = {l: (l, k, d) for l, k, d in every}
 
-    fam_dir = outdir / "families"
+    fam_dir = outdir / f"families{suffix}"
     fam_dir.mkdir(parents=True, exist_ok=True)
     placed = set()
     for fam, labels in FAMILIES.items():
@@ -962,7 +962,7 @@ def main(argv: list[str] | None = None) -> int:
                   ncols=min(3, len(chosen)), dark=ns.dark, notes=notes,
                   drug_only=ns.drug_only)
 
-    ind_dir = outdir / "individual"
+    ind_dir = outdir / f"individual{suffix}"
     ind_dir.mkdir(parents=True, exist_ok=True)
     for label, key, denom in every:
         plot_single(sub, label, key, denom, ind_dir / f"{_slug(label)}.png",
