@@ -10,9 +10,37 @@ and lives with the script that reads that panel.
 
 from __future__ import annotations
 
+from pathlib import Path
+
+import matplotlib
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+
+# Editable vector output. Text stays text in the PDF (TrueType, not Type 3
+# outlines) and in the SVG (<text> elements, not glyph paths), so every label,
+# p-value, point and bracket can be selected and changed in Illustrator,
+# Inkscape or PowerPoint. Liberation Sans shares Arial's metrics, so a layout
+# computed here holds on a machine that renders the same text in Arial.
+matplotlib.rcParams.update({
+    "pdf.fonttype": 42,
+    "ps.fonttype": 42,
+    "svg.fonttype": "none",
+    "font.family": "sans-serif",
+    "font.sans-serif": ["Arial", "Liberation Sans", "Helvetica", "DejaVu Sans"],
+    "mathtext.fontset": "custom",
+    "mathtext.rm": "Liberation Sans",
+    "mathtext.it": "Liberation Sans:italic",
+    "mathtext.bf": "Liberation Sans:bold",
+    "mathtext.sf": "Liberation Sans",
+    "mathtext.cal": "Liberation Sans:italic",
+    "mathtext.tt": "Liberation Mono",
+})
+
+# Superscripts are written by mathtext, which names only the font it drew them
+# with. Give those runs the same fallback chain as the rest of the text, so a
+# viewer without Liberation Sans reaches for Arial rather than its own default.
+_SVG_FALLBACK = "'Arial', 'Liberation Sans', 'Helvetica', sans-serif"
 
 # ---------------------------------------------------------------------------
 # Cohort split (surgery sheet). 501, 503 and 504 were assigned but have not
@@ -92,6 +120,17 @@ DARK = {
     "band": "#97968c",
     "flag": "#e66767",
 }
+
+
+def save_figure(fig, out_path, facecolor: str, dpi: int = 200) -> Path:
+    """PNG to look at; PDF and SVG to edit. Returns the PNG path."""
+    base = Path(out_path).with_suffix("")
+    for ext, kw in ((".png", {"dpi": dpi}), (".pdf", {}), (".svg", {})):
+        fig.savefig(base.with_suffix(ext), bbox_inches="tight", facecolor=facecolor, **kw)
+    svg = base.with_suffix(".svg")
+    svg.write_text(svg.read_text().replace("'Liberation Sans'\"", _SVG_FALLBACK + '"')
+                                  .replace("'Liberation Sans';", _SVG_FALLBACK + ";"))
+    return base.with_suffix(".png")
 
 
 def palette(dark: bool = False) -> dict:

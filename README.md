@@ -132,6 +132,35 @@ It also writes two QC figures, which are the point as much as the population plo
   figure if any cohort group falls entirely inside it — such a group cannot be
   compared with one outside it.
 
+## Presentation figures, corrections, and editable output
+
+`make_final_panels.py` draws the six-panel summary. The multiple-comparison
+procedure is a flag, because it is a choice rather than a fact about the data:
+
+```
+python3 make_final_panels.py                        # Welch ANOVA + Dunnett's T3 (default)
+python3 make_final_panels.py --correction tukey     # one-way ANOVA + Tukey
+python3 make_final_panels.py --correction games-howell
+python3 make_final_panels.py --correction none      # uncorrected Welch t
+```
+
+Tukey pools the variance and so assumes equal SDs; it is the natural partner of
+ordinary one-way ANOVA, not of Welch. After Welch the matching procedures are
+Games-Howell and Dunnett's T3, which GraphPad Prism recommends when n < 50 per
+group. All four compare every pair of the five groups, as Prism's "compare all
+pairs" does, and `posthoc.py` reproduces each: with two groups every method
+reduces to its plain two-sample test, and T3's studentized-maximum-modulus
+distribution is checked against its known limits. Planned comparisons are
+bracketed whatever their p, so a contrast that fails correction is shown
+failing. `posthoc_all_methods.csv` holds every pairwise p under every procedure.
+
+Every figure is written three ways: PNG to look at, and PDF and SVG to edit.
+Text stays live in both vector formats (TrueType in the PDF, `<text>` elements
+in the SVG), so labels, p-values, points and brackets can be moved or retyped in
+Illustrator, Inkscape or PowerPoint (insert the SVG, then Convert to Shape).
+Figures render in Liberation Sans, which shares Arial's metrics, and the SVGs
+name Arial first, so the layout holds on a machine that draws them in Arial.
+
 ## Files
 
 ## Files
@@ -141,6 +170,8 @@ It also writes two QC figures, which are the point as much as the population plo
 - `generate_synthetic_data.py`: writes the synthetic DeepLabCut tables
 - `plot_b1a_splenocytes.py`: the B-1 cohort figures described above
 - `plot_flow_panel.py`: the T cell / myeloid figures and their QC
-- `sci_cohorts.py`: the cohort split, palette and group-scatter panel both flow scripts share
+- `sci_cohorts.py`: the cohort split, palette, group-scatter panel and editable figure export the flow scripts share
+- `posthoc.py`: Tukey, Games-Howell and Dunnett's T3 for the five-group design
+- `make_final_panels.py`: the six-panel presentation figure
 
 MIT licensed.

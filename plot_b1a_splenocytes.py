@@ -287,7 +287,7 @@ def plot_measure(data: pd.DataFrame, measure: str, out_path: Path, dark: bool = 
                  x=0.085, ha="left", y=0.995)
     _footnote(c, fig)
     fig.tight_layout(rect=[0.02, 0.055, 1, 0.955])
-    fig.savefig(out_path, bbox_inches="tight", facecolor=c["surface"], dpi=200)
+    sc.save_figure(fig, out_path, c["surface"])
     plt.close(fig)
     return out_path
 
@@ -307,7 +307,7 @@ def plot_both(data: pd.DataFrame, out_path: Path, dark: bool = False,
                  x=0.045, ha="left", y=0.995)
     _footnote(c, fig, extra=["panels have independent y-scales"])
     fig.tight_layout(rect=[0.01, 0.055, 1, 0.945])
-    fig.savefig(out_path, bbox_inches="tight", facecolor=c["surface"], dpi=200)
+    sc.save_figure(fig, out_path, c["surface"])
     plt.close(fig)
     return out_path
 

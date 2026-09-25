@@ -35,6 +35,7 @@ from scipy import stats
 
 import sci_cohorts as sc
 import plot_b1a_splenocytes as b1a
+import posthoc as ph
 
 DEFAULT_COUNTS = Path("data/sci_flow_counts.csv")
 DEFAULT_META = Path("data/sci_flow_samples.csv")
@@ -379,7 +380,7 @@ def plot_grid(data: pd.DataFrame, panels: list, out_path: Path, title: str,
     _footnote(fig, c, notes or [])
     fig.tight_layout(rect=[0.005, 0.035, 1, 1 - (head - 0.05) / h_total],
                      h_pad=2.6, w_pad=1.8)
-    fig.savefig(out_path, bbox_inches="tight", facecolor=c["surface"], dpi=200)
+    sc.save_figure(fig, out_path, c["surface"])
     plt.close(fig)
     return out_path
 
@@ -428,7 +429,7 @@ def plot_qc(wide: pd.DataFrame, threshold: int, out_path: Path, dark: bool = Fal
     ax.set_title("log scale  ·  bars below the line are dropped from every population",
                  fontsize=9, color=c["text_secondary"], loc="left", pad=10)
     fig.tight_layout(rect=[0.01, 0.02, 1, 0.94])
-    fig.savefig(out_path, bbox_inches="tight", facecolor=c["surface"], dpi=200)
+    sc.save_figure(fig, out_path, c["surface"])
     plt.close(fig)
     return out_path
 
@@ -514,7 +515,7 @@ def plot_acquisition_qc(wide: pd.DataFrame, out_path: Path, dark: bool = False) 
                       "viability and doublet rate, so it is sample quality, not biology.",
                       fontsize=9, color=c["text_secondary"], loc="left", pad=26)
     fig.tight_layout(rect=[0.01, 0.01, 1, 0.94])
-    fig.savefig(out_path, bbox_inches="tight", facecolor=c["surface"], dpi=200)
+    sc.save_figure(fig, out_path, c["surface"])
     plt.close(fig)
     return out_path
 
@@ -601,7 +602,8 @@ def plot_contrast(data: pd.DataFrame, panels: list, out_path: Path, dark: bool =
     fig.suptitle("NM72 vs vehicle, by population", fontsize=13, fontweight="bold",
                  color=c["text"], x=0.045, ha="left", y=0.995)
     nsig = int((df["p"] < 0.05).sum())
-    tail = (f"{nsig} population(s) reach Welch p<0.05, flagged at right; the g interval "
+    tail = (f"{nsig} population(s) reach uncorrected Welch p<0.05 (none survives Dunnett's T3 or "
+            f"Tukey), flagged at right; the g interval "
             "uses a pooled SD and can be wider than the Welch test it sits beside"
             if nsig else "no population reaches Welch p<0.05")
     fig.text(0.045, 0.012,
@@ -610,7 +612,7 @@ def plot_contrast(data: pd.DataFrame, panels: list, out_path: Path, dark: bool =
                "stain and is never greyed",
              fontsize=8, color=c["text_muted"], ha="left")
     fig.tight_layout(rect=[0.005, 0.045, 1, 0.94])
-    fig.savefig(out_path, bbox_inches="tight", facecolor=c["surface"], dpi=200)
+    sc.save_figure(fig, out_path, c["surface"])
     plt.close(fig)
     return out_path
 
@@ -633,7 +635,7 @@ def plot_single(data: pd.DataFrame, label: str, key: str, denom: str, out_path: 
     fig.suptitle(_plain(label), fontsize=12, fontweight="bold", color=c["text"],
                  x=0.02, ha="left", y=0.995)
     fig.tight_layout(rect=[0, 0, 1, 0.94])
-    fig.savefig(out_path, bbox_inches="tight", facecolor=c["surface"], dpi=200)
+    sc.save_figure(fig, out_path, c["surface"])
     plt.close(fig)
     return out_path
 
@@ -710,7 +712,7 @@ def plot_timecourse(data: pd.DataFrame, panels: list, out_path: Path, title: str
                  x=0.05, ha="left", y=1 - 0.10 / h_total)
     _footnote(fig, c, (notes or []) + ["separate animals per timepoint, not a within-animal trajectory"])
     fig.tight_layout(rect=[0.005, 0.035, 1, 1 - (head - 0.05) / h_total], h_pad=2.6, w_pad=1.8)
-    fig.savefig(out_path, bbox_inches="tight", facecolor=c["surface"], dpi=200)
+    sc.save_figure(fig, out_path, c["surface"])
     plt.close(fig)
     return out_path
 
@@ -791,6 +793,15 @@ def export_prism(data: pd.DataFrame, panels: list, outdir: Path) -> None:
         q[order] = np.minimum.accumulate((pv[order] * m / np.arange(1, m + 1))[::-1])[::-1]
         con.loc[grp.index, "bh_q"] = np.clip(q, 0, 1)
     con.to_csv(pdir / "contrasts_all.csv", index=False)
+
+    ph_rows = []
+    order = ["Uninjured", "6 h Vehicle", "6 h NM72", "24 h Vehicle", "24 h NM72"]
+    lf = pd.DataFrame(long_rows)
+    for pop, d in lf.groupby("population", sort=False):
+        res = ph.pairwise({g: d[d.group == g]["value"].to_numpy(float) for g in order})
+        ph_rows += [{"population": pop, **r, "dropped_n_lt_2": ",".join(res["dropped"])}
+                    for r in res["rows"]]
+    pd.DataFrame(ph_rows).to_csv(pdir / "posthoc_all_methods.csv", index=False)
     con[con["kind"] == "drug"].to_csv(pdir / "contrasts_vehicle_vs_nm72.csv", index=False)
     print(f"Prism bundle: {pdir}/ "
           f"(per_animal_long, group_summary, contrasts, per_graph/*.csv)")
