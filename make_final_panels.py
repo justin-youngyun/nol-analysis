@@ -35,9 +35,13 @@ PANELS = [
     ("B-1a (IgM$^+$)", "B-1a (IgM+)", "% of B cells",
      [("Uninjured", "24 h Vehicle"), ("24 h Vehicle", "24 h NM72")]),
     ("IgM$^-$  (specificity control)", "IgM-", "% of B cells", []),
+    # Both arms rise over uninjured at 6 h, so both brackets are drawn: showing
+    # only the vehicle one would imply the drug arm was not elevated.
     ("Neutrophils", "Neutrophils", "% of live leukocytes",
-     [("Uninjured", "6 h Vehicle"), ("6 h Vehicle", "24 h Vehicle"),
-      ("6 h NM72", "24 h NM72")]),
+     [("Uninjured", "6 h Vehicle"), ("Uninjured", "6 h NM72"),
+      ("6 h Vehicle", "24 h Vehicle"), ("6 h NM72", "24 h NM72")]),
+    ("Tregs", "Tregs", "% of CD4$^+$", []),
+    ("CD25$^+$CD127$^-$", "CD25+CD127-", "% of CD4$^+$", []),
     ("MerTK on red pulp macrophages", "MerTK Median (M1 Like)", "median fluorescence", []),
 ]
 
@@ -69,10 +73,15 @@ def draw(ax, long: pd.DataFrame, con: pd.DataFrame, label: str, pop: str,
     ax.set_facecolor(c["surface"])
 
     un = present.get("Uninjured", np.array([]))
-    if un.size:
-        m, s = sc.mean_sem(un)
-        ax.axhspan(m - s, m + s, color=c["band"], alpha=0.13, zorder=0, linewidth=0)
+    if un.size > 1:
+        m, sem = sc.mean_sem(un)
+        ax.axhspan(m - sem, m + sem, color=c["band"], alpha=0.13, zorder=0, linewidth=0)
         ax.axhline(m, color=c["band"], linewidth=0.9, alpha=0.55, zorder=0)
+    elif un.size == 1:
+        ax.axhline(float(un[0]), color=c["band"], linewidth=0.9, alpha=0.4,
+                   linestyle=":", zorder=0)
+        ax.text(0.99, 0.90, "uninjured n=1: no baseline comparison possible",
+                transform=ax.transAxes, ha="right", va="top", fontsize=8, color=c["flag"])
 
     ymax = max(v.max() for v in present.values())
     top = ymax * (1.52 if brackets else 1.28)
@@ -150,25 +159,27 @@ def main(argv=None) -> int:
     outdir = Path(ns.outdir)
     outdir.mkdir(parents=True, exist_ok=True)
 
-    fig, axes = plt.subplots(2, 2, figsize=(11.6, 8.8), facecolor=c["surface"])
-    for ax, (label, pop, ylab, br), letter in zip(axes.flatten(), PANELS, "ABCD"):
+    fig, axes = plt.subplots(2, 3, figsize=(17.0, 9.0), facecolor=c["surface"])
+    for ax, (label, pop, ylab, br), letter in zip(axes.flatten(), PANELS, "ABCDEF"):
         draw(ax, long, con, label, pop, ylab, br, c)
-        ax.text(-0.14, 1.06, letter, transform=ax.transAxes, fontsize=15,
+        ax.text(-0.17, 1.06, letter, transform=ax.transAxes, fontsize=15,
                 fontweight="bold", color=c["text"], va="top")
 
     leg = fig.legend(handles=sc.legend_handles(c), loc="upper left", frameon=False,
-                     fontsize=10, ncol=3, bbox_to_anchor=(0.055, 0.962),
+                     fontsize=10, ncol=3, bbox_to_anchor=(0.038, 0.962),
                      handletextpad=0.4, columnspacing=1.6)
     for t in leg.get_texts():
         t.set_color(c["text_secondary"])
     fig.suptitle("Splenic immune response to SCI, and the effect of NM72",
-                 fontsize=14, fontweight="bold", color=c["text"], x=0.055, ha="left", y=0.995)
-    fig.text(0.055, 0.012,
-             "Mean ± SEM, every animal shown. Welch's t-test, exact p, uncorrected.  ·  "
-             "489 and 497 excluded on live-leukocyte yield.  ·  "
-             "6 h T cell / CD4 comparisons omitted: confounded with acquisition condition.",
+                 fontsize=14, fontweight="bold", color=c["text"], x=0.038, ha="left", y=0.995)
+    fig.text(0.038, 0.012,
+             "Mean ± SEM, every animal shown. Welch's t-test, exact p, uncorrected; only C survives "
+             "FDR across the full 121-comparison screen.  ·  489 and 497 excluded on live-leukocyte yield.\n"
+             "CD3 and CD4 frequencies are omitted: those track the acquisition-quality gradient "
+             "(Spearman 0.74, p=0.001) and cannot be separated from it at 6 h. D-F do not "
+             "(|rho| < 0.41, p > 0.12), so they are shown.",
              fontsize=8.5, color=c["text_muted"], ha="left")
-    fig.tight_layout(rect=[0.01, 0.035, 1, 0.925], h_pad=3.6, w_pad=3.2)
+    fig.tight_layout(rect=[0.01, 0.055, 1, 0.925], h_pad=3.6, w_pad=3.2)
     out = outdir / "NM72_summary_panels.png"
     fig.savefig(out, bbox_inches="tight", facecolor=c["surface"], dpi=300)
     fig.savefig(out.with_suffix(".pdf"), bbox_inches="tight", facecolor=c["surface"])
