@@ -7,3 +7,4 @@ matplotlib>=3.6
 # opencv-python   # faster perspective transform (a NumPy DLT fallback is used if absent)
 # statsmodels     # Lilliefors normality test (a KS fallback is used if absent)
 # tables          # only needed to read DeepLabCut .h5 files (.csv needs nothing extra)
+# python-pptx, lxml  # only for the slide deck (make_slides.py, slide_figures.py)

@@ -33,6 +33,7 @@ import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+import matplotlib.transforms as mtransforms
 import numpy as np
 import pandas as pd
 
@@ -75,7 +76,7 @@ NOTE_TUKEY = ("Tukey assumes equal SDs across groups: Brown-Forsythe p = 0.30-0.
               "0.048 for F.")
 NOTE_OMITTED = ("CD3 and CD4 frequencies are omitted: those track the acquisition-quality "
                 "gradient (Spearman 0.74, p=0.001) and cannot be separated from it at 6 h. D-F do "
-                "not (|rho| < 0.41, p > 0.12), so they are shown.")
+                "not (|rho| < 0.42, p > 0.12), so they are shown.")
 
 XS = {("Uninjured" if tp == "Uninjured" else f"{tp} {tr}"): x for tp, tr, x in sc.GROUPS}
 
@@ -115,8 +116,11 @@ def draw(ax, long: pd.DataFrame, res: dict, label: str, pop: str, ylab: str,
     elif un.size == 1:
         ax.axhline(float(un[0]), color=c["band"], linewidth=0.9, alpha=0.4,
                    linestyle=":", zorder=0)
-        ax.text(0.99, 0.90, "uninjured n=1: no baseline comparison possible",
-                transform=ax.transAxes, ha="right", va="top", fontsize=8, color=c["flag"])
+        # One line below the corner note, in points so it holds on any axes height.
+        ax.text(0.99, 0.97, "uninjured n=1: no baseline comparison possible",
+                transform=mtransforms.offset_copy(ax.transAxes, fig=ax.figure, y=-13,
+                                                  units="points"),
+                ha="right", va="top", fontsize=8, color=c["flag"])
 
     ymax = max(v.max() for v in present.values())
     top = ymax * (1.52 if brackets else 1.28)
@@ -136,25 +140,38 @@ def draw(ax, long: pd.DataFrame, res: dict, label: str, pop: str, ylab: str,
                 color=c["text_muted"])
 
     # Brackets sit just above the points they span, but two that overlap
-    # horizontally must not share a height or their labels collide.
-    placed: list[tuple[float, float, float]] = []
-    step = ymax * 0.145
+    # horizontally must not share a height or their labels collide. The step
+    # between stacked brackets is at least a label's height plus the bracket's
+    # drop; on a short axes that is more than the data-scaled default, so it is
+    # checked in points and the stack re-laid until it fits.
+    todo = []
     for a, b in brackets:
         if a not in present or b not in present:
             continue
         pv = _p(res, a, b, col)
-        if np.isnan(pv):
-            continue
-        x1, x2 = sorted((XS[a], XS[b]))
-        y = max(present[a].max(), present[b].max()) + ymax * 0.09
-        for px1, px2, py in placed:
-            if x1 <= px2 and px1 <= x2 and y < py + step:
-                y = py + step
+        if not np.isnan(pv):
+            todo.append((a, b, pv))
+    axes_pt = ax.get_position().height * ax.figure.get_figheight() * 72
+    step = ymax * 0.145
+    for _pass in range(4):
+        placed: list[tuple[float, float, float, float]] = []
+        for a, b, pv in todo:
+            x1, x2 = sorted((XS[a], XS[b]))
+            y = max(present[a].max(), present[b].max()) + ymax * 0.09
+            for px1, px2, py, _pv in placed:
+                if x1 <= px2 and px1 <= x2 and y < py + step:
+                    y = py + step
+            placed.append((x1, x2, y, pv))
+        span = max([top] + [y + ymax * 0.16 for _x1, _x2, y, _pv in placed])
+        need = 15.0 * span / axes_pt
+        if need <= step * 1.001:
+            break
+        step = need
+    for x1, x2, y, pv in placed:
         txt = f"p = {pv:.3f}" if pv >= 0.001 else "p < 0.001"
         _bracket(ax, x1, x2, y, txt, c["text"] if pv < 0.05 else c["text_muted"])
-        placed.append((x1, x2, y))
     if placed:
-        top = max(top, max(y for _a, _b, y in placed) + ymax * 0.16)
+        top = max(top, max(y for _a, _b, y, _pv in placed) + ymax * 0.16)
     if not brackets and present:
         any_sig = any(r[col] < 0.05 for r in res["rows"])
         msg = ("a comparison reaches p < 0.05; see CSV" if any_sig else
@@ -175,12 +192,17 @@ def draw(ax, long: pd.DataFrame, res: dict, label: str, pop: str, ylab: str,
     for side in ("left", "bottom"):
         ax.spines[side].set_color(c["grid"])
     ax.tick_params(colors=c["text_secondary"], length=4, width=0.8, labelsize=9.5)
+    # Timepoint underline and label, offset in points below the axis so they
+    # clear the tick labels whatever the axes height.
+    under = mtransforms.offset_copy(ax.get_xaxis_transform(), fig=ax.figure, y=-22,
+                                    units="points")
+    below = mtransforms.offset_copy(ax.get_xaxis_transform(), fig=ax.figure, y=-27,
+                                    units="points")
     for tp, (lo, hi) in sc.BRACKETS.items():
-        ax.annotate("", xy=(lo, -0.10), xytext=(hi, -0.10),
-                    xycoords=("data", "axes fraction"), textcoords=("data", "axes fraction"),
-                    arrowprops=dict(arrowstyle="-", color=c["text_muted"], linewidth=0.9))
-        ax.text((lo + hi) / 2, -0.15, tp, ha="center", va="top",
-                transform=ax.get_xaxis_transform(), fontsize=9.5, color=c["text_secondary"])
+        ax.plot([lo, hi], [0, 0], transform=under, color=c["text_muted"], linewidth=0.9,
+                clip_on=False)
+        ax.text((lo + hi) / 2, 0, tp, ha="center", va="top", transform=below,
+                fontsize=9.5, color=c["text_secondary"])
     ax.set_title(label, fontsize=11, fontweight="bold", color=c["text"], loc="left", pad=8)
 
 

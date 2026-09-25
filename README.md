@@ -161,7 +161,30 @@ Illustrator, Inkscape or PowerPoint (insert the SVG, then Convert to Shape).
 Figures render in Liberation Sans, which shares Arial's metrics, and the SVGs
 name Arial first, so the layout holds on a machine that draws them in Arial.
 
-## Files
+## Slide deck
+
+`make_slides.py` builds the deck for presenting the cohort, nine slides and four
+backups, as `outputs/slides/NM72_spleen_flow.pptx`:
+
+```
+python3 make_slides.py
+```
+
+It redraws its figures first (`slide_figures.py`). They are the summary
+figure's panels, split into ones and twos and sized so the text is readable when
+projected. Titles, callouts and footnotes are live text, and the statistics
+table is a native PowerPoint table. Each figure is stored the way PowerPoint
+stores an inserted SVG, as a PNG with the SVG embedded behind it. PowerPoint 365
+draws the SVG, and right-click → Convert to Shape makes every label, point and
+bracket editable. Older versions show the PNG.
+
+Every number in the slide text is computed from the data at build time. The
+build also asserts each claim the text makes: the 6 h → 24 h neutrophil fall
+survives T3, and no vehicle-vs-NM72 contrast does. If a re-analysis changes one
+of those, the build stops rather than leaving a stale slide. Speaker notes hold
+the caveats a reviewer is likely to ask about.
+
+It needs `python-pptx` and `lxml` in addition to `requirements.txt`.
 
 ## Files
 
@@ -173,5 +196,7 @@ name Arial first, so the layout holds on a machine that draws them in Arial.
 - `sci_cohorts.py`: the cohort split, palette, group-scatter panel and editable figure export the flow scripts share
 - `posthoc.py`: Tukey, Games-Howell and Dunnett's T3 for the five-group design
 - `make_final_panels.py`: the six-panel presentation figure
+- `slide_figures.py`: the summary panels cut and sized for slides, and the two QC backup figures
+- `make_slides.py`: the PowerPoint deck
 
 MIT licensed.
