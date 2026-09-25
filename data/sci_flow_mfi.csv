@@ -1,7 +1,7 @@
 sample,sampleID,path,stat,detector,marker,value
 489.fcs,88,Cells/Single Cells/Live Leukocytes/CD3+-/Red pulp Macs/M1 Like,Median,RB670-A,MerTK,
 489.fcs,88,Cells/Single Cells/Live Leukocytes/CD3+-/Red pulp Macs/M2 Like,Median,RB670-A,MerTK,
-483.fcs,89,Cells/Single Cells/Live Leukocytes/CD3+-/Red pulp Macs/M1 Like,Median,RB670-A,MerTK,16644.51171875
+483.fcs,89,Cells/Single Cells/Live Leukocytes/CD3+-/Red pulp Macs/M1 Like,Median,RB670-A,MerTK,16737.65234375
 483.fcs,89,Cells/Single Cells/Live Leukocytes/CD3+-/Red pulp Macs/M2 Like,Median,RB670-A,MerTK,13027.91796875
 492.fcs,90,Cells/Single Cells/Live Leukocytes/CD3+-/Red pulp Macs/M1 Like,Median,RB670-A,MerTK,12275.29296875
 492.fcs,90,Cells/Single Cells/Live Leukocytes/CD3+-/Red pulp Macs/M2 Like,Median,RB670-A,MerTK,7206.471191406
