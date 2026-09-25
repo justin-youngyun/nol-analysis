@@ -64,6 +64,7 @@ class LineItem:
     points: list[tuple[float, float]]   # inches from the canvas top-left
     color: str
     width: float       # points
+    kind: str = "line"                  # bracket, timepoint, gate
 
 
 @dataclass
@@ -149,8 +150,10 @@ def _kind(t: mtext.Text, ax, ticks: set) -> str:
         return "tick"
     if t is ax.title or t is ax._left_title:
         return "title"
-    if t is ax.yaxis.label:
+    if t is ax.yaxis.label or t is ax.xaxis.label:
         return "label"
+    if t.get_gid():
+        return t.get_gid()
     if s.startswith("p ") or s.startswith("p<") or s.startswith("p="):
         return "pvalue"
     if s.startswith("n="):
@@ -176,10 +179,22 @@ def render_panel(letter: str, size: tuple[float, float], method: str, results: d
     ax.text(-0.17, 1.06, letter, transform=ax.transAxes, fontsize=15, fontweight="bold",
             color=c["text"], va="top")
 
+    tag = "" if method == "dunnett-t3" else f"_{method}"
+    return lift(fig, ax, letter, outdir / f"panel_{letter}_{round(w * 100)}x{round(h * 100)}{tag}",
+                line_labels=(fp.BRACKET, fp.TIMEPOINT))
+
+
+def lift(fig, ax, name: str, base: Path, *, line_labels=(), dpi: int = 300) -> Panel:
+    """Record every drawn text and the labelled lines, remove them, save the rest.
+
+    Positions are inches from the canvas top-left, so the caller can rebuild
+    the text and lines as native objects over the saved picture.
+    """
+    w, h = fig.get_size_inches()
     fig.canvas.draw()
     renderer = fig.canvas.get_renderer()
-    dpi = fig.dpi
-    panel = Panel(letter, Path(), Path(), w, h)
+    fdpi = fig.dpi
+    panel = Panel(name, Path(), Path(), float(w), float(h))
 
     ylo, yhi = ax.get_ylim()
     xlo, xhi = ax.get_xlim()
@@ -198,7 +213,7 @@ def render_panel(letter: str, size: tuple[float, float], method: str, results: d
         rot = t.get_rotation() % 360
         panel.texts.append(TextItem(
             text=markup(t.get_text()),
-            x0=bb.x0 / dpi, x1=bb.x1 / dpi, y0=h - bb.y1 / dpi, y1=h - bb.y0 / dpi,
+            x0=bb.x0 / fdpi, x1=bb.x1 / fdpi, y0=h - bb.y1 / fdpi, y1=h - bb.y0 / fdpi,
             size=float(t.get_fontsize()), color=mcolors.to_hex(t.get_color())[1:].upper(),
             bold=_is_bold(t.get_fontweight()), rotation=rot,
             align="center" if rot else t.get_horizontalalignment(),
@@ -208,20 +223,18 @@ def render_panel(letter: str, size: tuple[float, float], method: str, results: d
     ax.tick_params(labelbottom=False, labelleft=False)
 
     for ln in ax.get_lines():
-        if ln.get_label() in (fp.BRACKET, fp.TIMEPOINT):
+        if ln.get_label() in line_labels:
             pts = ln.get_transform().transform(ln.get_xydata())
             panel.lines.append(LineItem(
-                points=[(x / dpi, h - y / dpi) for x, y in pts],
+                points=[(x / fdpi, h - y / fdpi) for x, y in pts],
                 color=mcolors.to_hex(ln.get_color())[1:].upper(),
-                width=float(ln.get_linewidth())))
+                width=float(ln.get_linewidth()), kind=ln.get_label().lstrip("_")))
             ln.set_visible(False)
 
-    outdir.mkdir(parents=True, exist_ok=True)
-    tag = "" if method == "dunnett-t3" else f"_{method}"
-    base = outdir / f"panel_{letter}_{round(w * 100)}x{round(h * 100)}{tag}"
+    base.parent.mkdir(parents=True, exist_ok=True)
     panel.png, panel.svg = base.with_suffix(".png"), base.with_suffix(".svg")
-    fig.savefig(panel.png, dpi=300, transparent=True)
-    fig.savefig(panel.svg, transparent=True)
+    fig.savefig(panel.png, dpi=dpi, transparent=True)
+    fig.savefig(panel.svg, transparent=True, dpi=dpi)   # dpi sets any rasterized layer
     plt.close(fig)
     office_svg(panel.svg)
     return panel

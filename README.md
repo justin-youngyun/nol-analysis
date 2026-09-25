@@ -187,6 +187,32 @@ speaker notes carry the numbers and caveats that used to be on the slides.
 
 It needs `python-pptx` and `lxml` in addition to `requirements.txt`.
 
+## Gating strategy slides
+
+`gating_slides.py` redraws a FlowJo workspace's layouts from the raw events. It
+writes one `.pptx` per layout to `outputs/gating/`:
+
+```
+python3 gating_slides.py WORKSPACE.wsp SAMPLE.fcs
+```
+
+`flowjo_gating.py` reads the sample's compensation matrix, per-channel
+transforms and gate tree from the workspace. It re-applies them to the FCS file
+and checks every population's count against FlowJo's
+(`python3 flowjo_gating.py WORKSPACE.wsp SAMPLE.fcs`). The biexponential axes
+use FlowJo's own biex algorithm with each channel's saved width, decades and
+negative range, so plots and gates sit where FlowJo puts them. Rectangle gates
+reproduce exactly. The singlet polygon differs from FlowJo by about 0.2% of
+events at its edge, which carries into the downstream counts. The plots print
+FlowJo's saved frequencies, so no number on a slide depends on that difference.
+
+Each plot is one PowerPoint group, arranged as in the FlowJo layout with space
+for arrows. Only the events are a picture. The axis titles (marker names, 14
+pt), tick labels, plot title, gate names and frequencies are native text, and
+the gate outlines are native lines. Labels are placed away from the events, the
+gate outlines and each other. A label with nowhere clear to go gets a light
+white backing.
+
 ## Files
 
 - `nol_analysis.py`: the analysis module and CLI entry point
@@ -199,5 +225,7 @@ It needs `python-pptx` and `lxml` in addition to `requirements.txt`.
 - `make_final_panels.py`: the six-panel presentation figure
 - `slide_figures.py`: draws each panel and lifts its text and lines out for the deck
 - `make_slides.py`: the PowerPoint deck, plots only, every label editable
+- `flowjo_gating.py`: re-applies a FlowJo workspace's compensation, transforms and gates to an FCS file
+- `gating_slides.py`: the workspace's layouts as editable gating-strategy slides
 
 MIT licensed.

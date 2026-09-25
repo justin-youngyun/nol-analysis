@@ -172,7 +172,8 @@ def _size(pt: float) -> float:
     return round(pt * 2) / 2
 
 
-def add_panel(slide, panel: sf.Panel, left: float, top: float, k: float, name: str):
+def add_panel(slide, panel: sf.Panel, left: float, top: float, k: float, name: str,
+              alt: str = "points, mean and SEM"):
     """One panel as one group: its picture, then native lines, then native text."""
     group = slide.shapes.add_group_shape()
     group.name = name
@@ -181,7 +182,7 @@ def add_panel(slide, panel: sf.Panel, left: float, top: float, k: float, name: s
     pic = shapes.add_picture(str(panel.png), Inches(left), Inches(top),
                              Inches(panel.width * k), Inches(panel.height * k))
     pic.name = f"{name} plot"
-    pic._element.nvPicPr.cNvPr.set("descr", f"{name}: points, mean and SEM")
+    pic._element.nvPicPr.cNvPr.set("descr", f"{name}: {alt}")
     embed_svg(slide, pic, panel.svg)
 
     for ln in panel.lines:
@@ -193,21 +194,22 @@ def add_panel(slide, panel: sf.Panel, left: float, top: float, k: float, name: s
         shp.fill.background()
         shp.line.color.rgb = rgb(ln.color)
         shp.line.width = Pt(ln.width * k)
-        shp.name = "bracket" if len(pts) == 4 else "timepoint line"
+        shp.name = {"timepoint": "timepoint line"}.get(ln.kind, ln.kind)
 
     for t in panel.texts:
         size = _size(t.size * k)
-        tw = text_width(t.text, size, t.bold)
+        lines = t.text.split("\n")
+        tw = max(text_width(line, size, t.bold) for line in lines)
         cx = left + k * (t.x0 + t.x1) / 2
         cy = top + k * (t.y0 + t.y1) / 2
-        backed = t.kind in ("pvalue", "note")
+        backed = t.kind in ("pvalue", "note", "gate_backed")
         if t.rotation:
             bw, bh = tw + 0.12, size * 1.2 / 72
             bx, by = cx - bw / 2, cy - bh / 2
         else:
             pad = 0.03 if backed else 0.12
             bw = tw + 2 * pad
-            bh = size * 1.2 / 72
+            bh = len(lines) * size * 1.2 / 72
             bx = {"left": left + k * t.x0,
                   "right": left + k * t.x1 - bw,
                   "center": cx - bw / 2}[t.align]
@@ -227,16 +229,20 @@ def add_panel(slide, panel: sf.Panel, left: float, top: float, k: float, name: s
         tf.auto_size = MSO_AUTO_SIZE.NONE
         tf.margin_left = tf.margin_right = tf.margin_top = tf.margin_bottom = 0
         tf.vertical_anchor = anchor
-        p = tf.paragraphs[0]
-        p.alignment = {"left": PP_ALIGN.LEFT, "right": PP_ALIGN.RIGHT,
-                       "center": PP_ALIGN.CENTER}[t.align if not t.rotation else "center"]
-        p.line_spacing = 1.0
-        _runs(p, t.text, size, t.color, t.bold)
+        for i, line in enumerate(lines):
+            p = tf.paragraphs[0] if i == 0 else tf.add_paragraph()
+            p.alignment = {"left": PP_ALIGN.LEFT, "right": PP_ALIGN.RIGHT,
+                           "center": PP_ALIGN.CENTER}[t.align if not t.rotation else "center"]
+            p.line_spacing = 1.0
+            _runs(p, line, size, t.color, t.bold)
         if t.rotation:
             box.rotation = 360 - t.rotation
         if backed:
             box.fill.solid()
             box.fill.fore_color.rgb = rgb(WHITE)
+            if t.kind == "gate_backed":     # lets the events show through a little
+                clr = box.fill._xPr.find(qn("a:solidFill")).find(qn("a:srgbClr"))
+                etree.SubElement(clr, qn("a:alpha")).set("val", "78000")
     return group
 
 
