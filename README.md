@@ -134,14 +134,26 @@ It also writes two QC figures, which are the point as much as the population plo
 
 ## Presentation figures, corrections, and editable output
 
-`make_final_panels.py` draws the six-panel summary. The multiple-comparison
-procedure is a flag, because it is a choice rather than a fact about the data:
+`make_final_panels.py` draws the six-panel summary. It brackets two families of
+comparisons.
+
+Vehicle vs NM72 within each timepoint is bracketed on every panel. It is tested
+the way Prism's two-way ANOVA does when asked to compare cell means within each
+row: timepoint × treatment on the four injured groups, the pooled SD of those
+groups (df = N − 4), and Šidák's correction for the two comparisons.
+`posthoc.within_rows` computes it and matches a full-factorial OLS fit exactly.
+`posthoc_within_timepoint.csv` holds it alongside Welch's t, with and without
+Šidák.
+
+The injury and recovery comparisons (against uninjured, and 6 h vs 24 h) come
+from all pairwise comparisons of the five groups. That procedure is a flag,
+because it is a choice rather than a fact about the data:
 
 ```
 python3 make_final_panels.py                        # Welch ANOVA + Dunnett's T3 (default)
 python3 make_final_panels.py --correction tukey     # one-way ANOVA + Tukey
 python3 make_final_panels.py --correction games-howell
-python3 make_final_panels.py --correction none      # uncorrected Welch t
+python3 make_final_panels.py --correction none      # uncorrected Welch t, both families
 ```
 
 Tukey pools the variance and so assumes equal SDs; it is the natural partner of
@@ -165,9 +177,12 @@ name Arial first, so the layout holds on a machine that draws them in Arial.
 
 `make_slides.py` builds `outputs/slides/NM72_spleen_flow.pptx`, which holds the
 plots and nothing else. It has all six panels on one slide, then neutrophils (C),
-B-1a with its IgM⁻ control (A–B), Tregs with CD25⁺CD127⁻ (D–E) and MerTK (F), and
-a table of every planned comparison under uncorrected Welch, Tukey and
-Dunnett's T3.
+B-1a with its IgM⁻ fraction (A–B), Tregs with CD25⁺CD127⁻ (D–E) and MerTK (F).
+Two tables follow. The first gives the bracketed comparisons among all pairs of
+the five groups, under uncorrected Welch, Tukey and Dunnett's T3. The second
+gives vehicle vs NM72 within each timepoint: means, n and change, then
+uncorrected Welch, Welch + Šidák, and the two-way ANOVA + Šidák that the
+brackets show.
 
 ```
 python3 make_slides.py
@@ -182,8 +197,8 @@ Convert to Shape makes the points editable too.
 
 `slide_figures.py` draws each panel with the summary figure's own `draw()`,
 records where matplotlib put every text and bracket, and removes them from the
-image. `make_slides.py` then rebuilds them in place at the slide's scale. The
-speaker notes carry the numbers and caveats that used to be on the slides.
+image. `make_slides.py` then rebuilds them in place at the slide's scale. Only
+slide 1 has speaker notes, saying which test each bracket shows.
 
 It needs `python-pptx` and `lxml` in addition to `requirements.txt`.
 
@@ -221,7 +236,7 @@ white backing.
 - `plot_b1a_splenocytes.py`: the B-1 cohort figures described above
 - `plot_flow_panel.py`: the T cell / myeloid figures and their QC
 - `sci_cohorts.py`: the cohort split, palette, group-scatter panel and editable figure export the flow scripts share
-- `posthoc.py`: Tukey, Games-Howell and Dunnett's T3 for the five-group design
+- `posthoc.py`: Tukey, Games-Howell and Dunnett's T3 for the five-group design, and the within-timepoint two-way ANOVA comparisons
 - `make_final_panels.py`: the six-panel presentation figure
 - `slide_figures.py`: draws each panel and lifts its text and lines out for the deck
 - `make_slides.py`: the PowerPoint deck, plots only, every label editable

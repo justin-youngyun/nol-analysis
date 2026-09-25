@@ -11,16 +11,21 @@ belong in a set people read quickly.
 Significance is annotated as exact p, not stars: at n=3-4 the distance between
 p=0.02 and p=0.06 is not a category boundary and should not be drawn as one.
 
-The multiple-comparison procedure is a choice, so it is a flag:
+Two families of comparisons are bracketed. Vehicle vs NM72 within each
+timepoint is on every panel, tested as a two-way ANOVA (timepoint x treatment)
+with Sidak's correction for the two comparisons, the way Prism does it. The
+injury and recovery comparisons against uninjured and across timepoints come
+from all pairwise comparisons of the five groups, and that procedure is a
+choice, so it is a flag:
 
     python3 make_final_panels.py                       # Dunnett's T3 (default)
     python3 make_final_panels.py --correction tukey
     python3 make_final_panels.py --correction games-howell
-    python3 make_final_panels.py --correction none     # uncorrected Welch
+    python3 make_final_panels.py --correction none     # uncorrected Welch, both families
 
 Every run writes PNG, PDF and SVG with live text, so labels, p-values, points
-and brackets stay editable in Illustrator, Inkscape or PowerPoint, plus a CSV of
-every pairwise p under every procedure for the panels shown.
+and brackets stay editable in Illustrator, Inkscape or PowerPoint, plus CSVs of
+every pairwise p under every procedure and of the within-timepoint tests.
 """
 
 from __future__ import annotations
@@ -48,19 +53,24 @@ ORDER = ["Uninjured", "6 h Vehicle", "6 h NM72", "24 h Vehicle", "24 h NM72"]
 # correction; they are drawn whatever their p, so a contrast that fails
 # correction is shown failing rather than quietly disappearing.
 PANELS = [
-    ("B-1a (IgM$^+$)", "B-1a (IgM+)", "% of B cells",
-     [("Uninjured", "24 h Vehicle"), ("24 h Vehicle", "24 h NM72")]),
-    ("IgM$^-$  (specificity control)", "IgM-", "% of B cells", []),
+    ("B-1a (IgM$^+$)", "B-1a (IgM+)", "% of B cells", [("Uninjured", "24 h Vehicle")]),
+    ("B-1a IgM$^-$", "IgM-", "% of B cells", []),
     # Both arms rise over uninjured at 6 h, so both brackets are drawn: showing
     # only the vehicle one would imply the drug arm was not elevated.
     ("Neutrophils", "Neutrophils", "% of live leukocytes",
      [("Uninjured", "6 h Vehicle"), ("Uninjured", "6 h NM72"),
-      ("6 h Vehicle", "6 h NM72"),
       ("6 h Vehicle", "24 h Vehicle"), ("6 h NM72", "24 h NM72")]),
     ("Tregs", "Tregs", "% of CD4$^+$", []),
     ("CD25$^+$CD127$^-$", "CD25+CD127-", "% of CD4$^+$", []),
     ("MerTK on red pulp macrophages", "MerTK Median (M1 Like)", "median fluorescence", []),
 ]
+
+# Every panel also brackets vehicle vs NM72 within each timepoint. Those two are
+# their own family, the drug question, tested as Prism's two-way ANOVA does
+# (posthoc.within_rows): pooled SD of the four injured groups, Sidak for two.
+WITHIN = [("6 h Vehicle", "6 h NM72"), ("24 h Vehicle", "24 h NM72")]
+INJURED = ["6 h Vehicle", "6 h NM72", "24 h Vehicle", "24 h NM72"]
+WITHIN_METHOD = "two-way ANOVA (timepoint × treatment) + Šidák"
 
 TITLE = "Splenic immune response to SCI, and the effect of NM72"
 
@@ -70,8 +80,8 @@ NOTE_483_UNCORRECTED = ("C: animal 483's CD3 gate was tightened after initial an
                         "neutrophils 3.87% to 5.67%); with the original gate, 6 h vehicle vs NM72 "
                         "is p = 0.26. Mann-Whitney p = 0.11, exact permutation p = 0.09.")
 NOTE_483_CORRECTED = ("C: animal 483's CD3 gate was tightened after initial analysis (its "
-                      "neutrophils 3.87% to 5.67%), moving the uncorrected 6 h vehicle-vs-NM72 p "
-                      "from 0.26 to 0.048; neither survives correction.")
+                      "neutrophils 3.87% to 5.67%); with the original gate, 6 h vehicle vs NM72 "
+                      "is p = 0.287 instead of 0.036.")
 NOTE_TUKEY = ("Tukey assumes equal SDs across groups: Brown-Forsythe p = 0.30-0.79 for A-E, "
               "0.048 for F.")
 NOTE_OMITTED = ("CD3 and CD4 frequencies are omitted: those track the acquisition-quality "
@@ -84,6 +94,17 @@ XS = {("Uninjured" if tp == "Uninjured" else f"{tp} {tr}"): x for tp, tr, x in s
 def _stats(long: pd.DataFrame, pop: str) -> dict:
     d = long[long.population == pop]
     return ph.pairwise({g: d[d.group == g]["value"].to_numpy(float) for g in ORDER})
+
+
+def _within(long: pd.DataFrame, pop: str) -> list[dict]:
+    d = long[long.population == pop]
+    return ph.within_rows({g: d[d.group == g]["value"].to_numpy(float) for g in INJURED},
+                          WITHIN)
+
+
+def within_col(correction: str) -> str:
+    """Which within-timepoint p goes on the drug brackets under each correction."""
+    return "welch_p" if correction == "none" else "anova_sidak_p"
 
 
 def _p(res: dict, a: str, b: str, col: str) -> float:
@@ -107,7 +128,8 @@ def _bracket(ax, x1, x2, y, text, color, drop=0.02):
 
 
 def draw(ax, long: pd.DataFrame, res: dict, label: str, pop: str, ylab: str,
-         brackets: list, c: dict, col: str, corrected: bool) -> None:
+         brackets: list, c: dict, col: str, within: list[dict] | None = None,
+         wcol: str = "anova_sidak_p") -> None:
     d = long[long.population == pop]
     vals = {g: d[d.group == g]["value"].dropna().to_numpy(float) for g in XS}
     present = {g: v for g, v in vals.items() if v.size}
@@ -121,14 +143,21 @@ def draw(ax, long: pd.DataFrame, res: dict, label: str, pop: str, ylab: str,
     elif un.size == 1:
         ax.axhline(float(un[0]), color=c["band"], linewidth=0.9, alpha=0.4,
                    linestyle=":", zorder=0)
-        # One line below the corner note, in points so it holds on any axes height.
-        ax.text(0.99, 0.97, "uninjured n=1: no baseline comparison possible",
-                transform=mtransforms.offset_copy(ax.transAxes, fig=ax.figure, y=-13,
-                                                  units="points"),
-                ha="right", va="top", fontsize=8, color=c["flag"])
+
+    # The drug brackets first: short and low, so the longer ones stack above them.
+    todo = []
+    for r in within or []:
+        if r["group_a"] in present and r["group_b"] in present:
+            todo.append((r["group_a"], r["group_b"], r[wcol]))
+    for a, b in brackets:
+        if a not in present or b not in present:
+            continue
+        pv = _p(res, a, b, col)
+        if not np.isnan(pv):
+            todo.append((a, b, pv))
 
     ymax = max(v.max() for v in present.values())
-    top = ymax * (1.52 if brackets else 1.28)
+    top = ymax * (1.52 if todo else 1.28)
     ax.set_ylim(0, top)
 
     for g, v in present.items():
@@ -149,23 +178,23 @@ def draw(ax, long: pd.DataFrame, res: dict, label: str, pop: str, ylab: str,
     # between stacked brackets is at least a label's height plus the bracket's
     # drop; on a short axes that is more than the data-scaled default, so it is
     # checked in points and the stack re-laid until it fits.
-    todo = []
-    for a, b in brackets:
-        if a not in present or b not in present:
-            continue
-        pv = _p(res, a, b, col)
-        if not np.isnan(pv):
-            todo.append((a, b, pv))
     axes_pt = ax.get_position().height * ax.figure.get_figheight() * 72
     step = ymax * 0.145
     for _pass in range(4):
         placed: list[tuple[float, float, float, float]] = []
         for a, b, pv in todo:
             x1, x2 = sorted((XS[a], XS[b]))
-            y = max(present[a].max(), present[b].max()) + ymax * 0.09
-            for px1, px2, py, _pv in placed:
-                if x1 <= px2 and px1 <= x2 and y < py + step:
-                    y = py + step
+            # Clear every group the bracket spans, not only its two ends, then
+            # every overlapping bracket within a step of it. Each move goes up
+            # past one of those, so this ends; the tolerance keeps a bracket set
+            # exactly one step above another from counting as a clash.
+            y = max(v.max() for g, v in present.items() if x1 <= XS[g] <= x2) + ymax * 0.09
+            while True:
+                clash = [py for px1, px2, py, _pv in placed
+                         if x1 <= px2 and px1 <= x2 and abs(y - py) < step * (1 - 1e-9)]
+                if not clash:
+                    break
+                y = max(clash) + step
             placed.append((x1, x2, y, pv))
         span = max([top] + [y + ymax * 0.16 for _x1, _x2, y, _pv in placed])
         need = 17.0 * span / axes_pt
@@ -177,12 +206,6 @@ def draw(ax, long: pd.DataFrame, res: dict, label: str, pop: str, ylab: str,
         _bracket(ax, x1, x2, y, txt, c["text"] if pv < 0.05 else c["text_muted"])
     if placed:
         top = max(top, max(y for _a, _b, y, _pv in placed) + ymax * 0.16)
-    if not brackets and present:
-        any_sig = any(r[col] < 0.05 for r in res["rows"])
-        msg = ("a comparison reaches p < 0.05; see CSV" if any_sig else
-               "no comparison reaches " + ("adjusted " if corrected else "") + "p < 0.05")
-        ax.text(0.99, 0.97, msg, transform=ax.transAxes, ha="right", va="top",
-                fontsize=8.5, color=c["text_muted"])
 
     ax.set_xlim(-0.8, 5.1)
     ax.set_ylim(0, top)
@@ -230,10 +253,14 @@ def main(argv=None) -> int:
     rows = [{"population": pop, **r, "dropped_n_lt_2": ",".join(res["dropped"])}
             for pop, res in results.items() for r in res["rows"]]
     pd.DataFrame(rows).to_csv(outdir / "posthoc_all_methods.csv", index=False)
+    within = {pop: _within(long, pop) for _l, pop, _y, _b in PANELS}
+    pd.DataFrame([{"population": pop, **r} for pop, rs in within.items() for r in rs]).to_csv(
+        outdir / "posthoc_within_timepoint.csv", index=False)
+    wcol = within_col(ns.correction)
 
     fig, axes = plt.subplots(2, 3, figsize=(17.0, 9.0), facecolor=c["surface"])
     for ax, (label, pop, ylab, br), letter in zip(axes.flatten(), PANELS, "ABCDEF"):
-        draw(ax, long, results[pop], label, pop, ylab, br, c, col, corrected)
+        draw(ax, long, results[pop], label, pop, ylab, br, c, col, within[pop], wcol)
         ax.text(-0.17, 1.06, letter, transform=ax.transAxes, fontsize=15,
                 fontweight="bold", color=c["text"], va="top")
 
@@ -245,11 +272,11 @@ def main(argv=None) -> int:
     fig.suptitle(TITLE, fontsize=14, fontweight="bold", color=c["text"],
                  x=0.038, ha="left", y=0.995)
 
-    head = (f"Mean ± SEM, every animal shown. {method}"
-            + (", all pairwise comparisons across the five groups; adjusted p shown, grey where "
-               "p ≥ 0.05." if corrected else "; exact p, grey where p ≥ 0.05.")
-            + "  ·  " + NOTE_EXCLUSIONS)
-    lines = [head, NOTE_483_CORRECTED if corrected else NOTE_483_UNCORRECTED]
+    tests = (f"Vehicle vs NM72 within each timepoint: {WITHIN_METHOD}. Other brackets: {method}, "
+             "all pairwise comparisons across the five groups. Adjusted p shown, grey where "
+             "p ≥ 0.05." if corrected else f"{method}; exact p, grey where p ≥ 0.05.")
+    lines = [f"Mean ± SEM, every animal shown. {NOTE_EXCLUSIONS}", tests,
+             NOTE_483_CORRECTED if corrected else NOTE_483_UNCORRECTED]
     if ns.correction == "tukey":
         lines.append(NOTE_TUKEY)
     lines.append(NOTE_OMITTED)
@@ -258,7 +285,8 @@ def main(argv=None) -> int:
 
     out = sc.save_figure(fig, outdir / f"NM72_summary_panels_{ns.correction}", c["surface"], dpi=300)
     plt.close(fig)
-    print(f"Saved: {out} (+ .pdf, .svg) and {outdir / 'posthoc_all_methods.csv'}")
+    print(f"Saved: {out} (+ .pdf, .svg), {outdir / 'posthoc_all_methods.csv'} and "
+          f"{outdir / 'posthoc_within_timepoint.csv'}")
     return 0
 
 

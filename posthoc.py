@@ -15,6 +15,12 @@ options GraphPad Prism offers so any number here can be reproduced there.
 All three compare every pair of groups, as Prism's "compare all pairs" does.
 Groups with fewer than two animals carry no variance estimate, so they are
 dropped from the family and named in the result rather than silently.
+
+within_rows() is the other family: a few planned comparisons inside a
+two-factor design (vehicle vs NM72 at each timepoint), as Prism's two-way
+ANOVA does when asked to compare cell means within each row. It uses the
+pooled SD of the design's cells and Sidak's correction for the number of
+comparisons, and also reports Welch's t for each, with and without Sidak.
 """
 
 from __future__ import annotations
@@ -82,3 +88,33 @@ METHODS = {
     "games-howell": ("games_howell_p", "Welch ANOVA + Games-Howell"),
     "dunnett-t3": ("dunnett_t3_p", "Welch ANOVA + Dunnett's T3"),
 }
+
+
+def within_rows(cells: dict[str, np.ndarray], pairs: list[tuple[str, str]]) -> list[dict]:
+    """Planned comparisons within the rows of a two-factor design.
+
+    cells holds every cell of the design (for the SCI cohort, the four injured
+    groups), pairs the comparisons to make. The pooled-SD test uses the full
+    factorial model's residual mean square, df = N - number of cells, so it is
+    Prism's two-way ANOVA with Sidak's multiple comparisons within rows.
+    """
+    cells = {k: np.asarray(v, float)[~np.isnan(np.asarray(v, float))] for k, v in cells.items()}
+    cells = {k: v for k, v in cells.items() if v.size}
+    df = sum(v.size for v in cells.values()) - len(cells)
+    mse = sum(((v - v.mean()) ** 2).sum() for v in cells.values()) / df
+    m = len(pairs)
+    rows = []
+    for a, b in pairs:
+        x, y = cells.get(a), cells.get(b)
+        if x is None or y is None or x.size < 2 or y.size < 2:
+            continue
+        t = (y.mean() - x.mean()) / np.sqrt(mse * (1 / x.size + 1 / y.size))
+        p = float(2 * stats.t.sf(abs(t), df))
+        wt, wdf = _welch(x, y)
+        wp = float(2 * stats.t.sf(abs(wt), wdf))
+        rows.append({"group_a": a, "group_b": b, "n_a": x.size, "n_b": y.size,
+                     "mean_a": float(x.mean()), "mean_b": float(y.mean()),
+                     "anova_t": float(t), "anova_df": df, "anova_p": p,
+                     "anova_sidak_p": 1 - (1 - p) ** m,
+                     "welch_p": wp, "welch_sidak_p": 1 - (1 - wp) ** m})
+    return rows

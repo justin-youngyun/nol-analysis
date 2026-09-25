@@ -175,7 +175,8 @@ def render_panel(letter: str, size: tuple[float, float], method: str, results: d
     left, right, top, bottom = MARGINS
     fig = plt.figure(figsize=(w, h))
     ax = fig.add_axes([left / w, bottom / h, (w - left - right) / w, (h - top - bottom) / h])
-    fp.draw(ax, long, results[pop], label, pop, ylab, brackets, c, col, method != "none")
+    fp.draw(ax, long, results[pop], label, pop, ylab, brackets, c, col, fp._within(long, pop),
+            fp.within_col(method))
     ax.text(-0.17, 1.06, letter, transform=ax.transAxes, fontsize=15, fontweight="bold",
             color=c["text"], va="top")
 

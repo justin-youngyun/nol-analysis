@@ -4,19 +4,20 @@ The slide deck: the summary panels, and the statistics behind them. Plots only.
 
     python3 make_slides.py        # -> outputs/slides/NM72_spleen_flow.pptx
 
-Slides: all six panels (A-F), then neutrophils (C), B-1a with its IgM- control
-(A-B), Tregs with CD25+CD127- (D-E), MerTK (F), and the table of every planned
-comparison under three procedures.
+Slides: all six panels (A-F), then neutrophils (C), B-1a with its IgM- fraction
+(A-B), Tregs with CD25+CD127- (D-E), MerTK (F), then two tables: the bracketed
+comparisons among all pairs of the five groups under three procedures, and
+vehicle vs NM72 within each timepoint.
 
 Each panel is one PowerPoint group, so it moves and resizes as a unit. Inside
 the group the points, error bars and grid are a picture (PNG, with the SVG
 embedded so PowerPoint 365 can Convert to Shape), and everything else is
-native: every title, axis label, tick label, n=, p-value and note is a text
-box, and every bracket and timepoint line is a line. slide_figures.py draws
-the panels with the summary figure's own draw() call and records where each
-of those pieces goes.
+native: every title, axis label, tick label, n= and p-value is a text box, and
+every bracket and timepoint line is a line. slide_figures.py draws the panels
+with the summary figure's own draw() call and records where each of those
+pieces goes.
 
-Speaker notes carry what used to be on the slides, for anyone who asks.
+Only slide 1 has speaker notes: which test each bracket shows.
 """
 
 from __future__ import annotations
@@ -35,7 +36,6 @@ from pptx.opc.constants import RELATIONSHIP_TYPE as RT
 from pptx.opc.package import Part
 from pptx.oxml.ns import qn
 from pptx.util import Emu, Inches, Pt
-from scipy import stats
 
 import make_final_panels as fp
 import slide_figures as sf
@@ -64,14 +64,11 @@ PAIR = ((5.0, 4.9), 1.22)
 # Numbers, for the speaker notes and the table
 # ---------------------------------------------------------------------------
 
-def fmt_p(p: float) -> str:
-    return "p < 0.001" if p < 0.001 else f"p = {p:.3f}"
-
-
 class Numbers:
     def __init__(self):
         self.long = pd.read_csv(fp.LONG)
         self.res = {pop: fp._stats(self.long, pop) for _l, pop, _y, _b in fp.PANELS}
+        self.within = {pop: fp._within(self.long, pop) for _l, pop, _y, _b in fp.PANELS}
 
     def values(self, pop: str, group: str) -> np.ndarray:
         d = self.long[(self.long.population == pop) & (self.long.group == group)]
@@ -86,26 +83,13 @@ class Numbers:
     def p(self, pop: str, a: str, b: str, col: str = "dunnett_t3_p") -> float:
         return float(fp._p(self.res[pop], a, b, col))
 
+    def w(self, pop: str, tp: str) -> dict:
+        """The within-timepoint row: vehicle vs NM72 at tp."""
+        return next(r for r in self.within[pop] if r["group_a"] == f"{tp} Vehicle")
+
     def change(self, pop: str, tp: str) -> float:
         v, d = self.mean(pop, f"{tp} Vehicle"), self.mean(pop, f"{tp} NM72")
         return 100 * (d - v) / v
-
-    def welch_ci(self, pop: str, tp: str) -> tuple[float, float]:
-        a, b = self.values(pop, f"{tp} Vehicle"), self.values(pop, f"{tp} NM72")
-        va, vb = a.var(ddof=1) / a.size, b.var(ddof=1) / b.size
-        df = (va + vb) ** 2 / (va ** 2 / (a.size - 1) + vb ** 2 / (b.size - 1))
-        half = stats.t.ppf(0.975, df) * np.sqrt(va + vb)
-        diff = b.mean() - a.mean()
-        return 100 * (diff - half) / a.mean(), 100 * (diff + half) / a.mean()
-
-    def leave_one_out(self, pop: str, tp: str) -> tuple[float, float]:
-        d = self.long[self.long.population == pop]
-        v = d[d.group == f"{tp} Vehicle"].dropna(subset=["value"])
-        t = d[d.group == f"{tp} NM72"].dropna(subset=["value"])
-        ps = [stats.ttest_ind(v[v.animal != a]["value"], t[t.animal != a]["value"],
-                              equal_var=False).pvalue
-              for a in list(v.animal) + list(t.animal)]
-        return min(ps), max(ps)
 
 
 # ---------------------------------------------------------------------------
@@ -267,38 +251,33 @@ def _cell_borders(c, fill=None, bottom=None):
         etree.SubElement(tc_pr, qn("a:noFill"))
 
 
-def stats_table(s, N: Numbers, top: float) -> None:
-    V6, N6, V24, N24, UN = "6 h Vehicle", "6 h NM72", "24 h Vehicle", "24 h NM72", "Uninjured"
-    readouts = [("B-1a (IgM+)", "B-1a"), ("IgM-", "IgM^{−}"), ("Neutrophils", "Neutrophils"),
-                ("Tregs", "Tregs"), ("CD25+CD127-", "CD25^{+}CD127^{−}"),
-                ("MerTK Median (M1 Like)", "MerTK")]
+# Table rows use the panel titles, so a readout reads the same on plot and table.
+READOUTS = [("B-1a (IgM+)", "B-1a (IgM^{+})"), ("IgM-", "B-1a IgM^{−}"),
+            ("Neutrophils", "Neutrophils"), ("Tregs", "Tregs"),
+            ("CD25+CD127-", "CD25^{+}CD127^{−}"), ("MerTK Median (M1 Like)", "MerTK")]
+HEAD_H, ROW_H = 0.46, 0.228
 
-    def means(pop, a, b):
-        ma, mb = N.mean(pop, a), N.mean(pop, b)
-        return f"{ma:,.0f} vs {mb:,.0f}" if ma > 100 else f"{ma:.2f} vs {mb:.2f}"
 
-    rows = [("section", "Vehicle vs NM72")]
-    for pop, label in readouts:
-        for tp in ("6 h", "24 h"):
-            rows.append((label, f"{tp}: vehicle vs NM72", pop, f"{tp} Vehicle", f"{tp} NM72"))
-    rows.append(("section", "Injury and recovery"))
-    for pop, label, a, b, text in [
-            ("B-1a (IgM+)", "B-1a", UN, V24, "Uninjured vs 24 h vehicle"),
-            ("Neutrophils", "Neutrophils", UN, V6, "Uninjured vs 6 h vehicle"),
-            ("Neutrophils", "Neutrophils", UN, N6, "Uninjured vs 6 h NM72"),
-            ("Neutrophils", "Neutrophils", V6, V24, "6 h vs 24 h, vehicle"),
-            ("Neutrophils", "Neutrophils", N6, N24, "6 h vs 24 h, NM72")]:
-        rows.append((label, text, pop, a, b))
+def table_height(n_body: int) -> float:
+    return HEAD_H + ROW_H * n_body
 
-    head = ["Readout", "Comparison", "Means", "Welch t\n(uncorrected)", "Tukey",
-            "Dunnett's T3\n(default)"]
-    widths = [1.75, 2.85, 2.1, 1.8, 1.8, 1.8]
-    n_rows = len(rows) + 1
-    row_h = 0.228
+
+def _fmt(pv: float) -> str:
+    return "< 0.001" if pv < 0.001 else f"{pv:.3f}"
+
+
+def _table(s, name: str, head: list[str], widths: list[float], aligns: str, n_body: int,
+           top: float, shade: int):
+    """A plain table, centred across the slide, its column `shade` tinted.
+
+    Returns a cell writer, cell(i, j, text, ...), and a section(i, text) that
+    writes a label across the columns left of the tinted one.
+    """
+    n_rows = n_body + 1
     left = (W - sum(widths)) / 2
     gf = s.shapes.add_table(n_rows, len(head), Inches(left), Inches(top), Inches(sum(widths)),
-                            Inches(row_h * n_rows))
-    gf.name = "Statistics table"
+                            Inches(ROW_H * n_rows))
+    gf.name = name
     tbl = gf.table
     tbl_pr = gf._element.graphic.graphicData.tbl.tblPr
     tbl_pr.set("firstRow", "1")
@@ -309,12 +288,11 @@ def stats_table(s, N: Numbers, top: float) -> None:
     style_id.text = "{2D5ABB26-0587-4C30-8999-92F81FD0307C}"  # No Style, No Grid
     for j, wdt in enumerate(widths):
         tbl.columns[j].width = Inches(wdt)
-    tbl.rows[0].height = Inches(0.46)
+    tbl.rows[0].height = Inches(HEAD_H)
     for i in range(1, n_rows):
-        tbl.rows[i].height = Inches(row_h)
+        tbl.rows[i].height = Inches(ROW_H)
 
-    def cell(i, j, text, *, bold=False, color=INK, size=10.5, align="l", fill=None,
-             bottom=None):
+    def cell(i, j, text, *, bold=False, color=INK, size=10.5, bottom=(RULE, 0.5)):
         c = tbl.cell(i, j)
         c.margin_left = c.margin_right = Inches(0.06)
         c.margin_top = c.margin_bottom = Inches(0.02)
@@ -322,29 +300,96 @@ def stats_table(s, N: Numbers, top: float) -> None:
         tf = c.text_frame
         for k, para in enumerate(text.split("\n")):
             p = tf.paragraphs[0] if k == 0 else tf.add_paragraph()
-            p.alignment = {"l": PP_ALIGN.LEFT, "c": PP_ALIGN.CENTER}[align]
+            p.alignment = {"l": PP_ALIGN.LEFT, "c": PP_ALIGN.CENTER}[aligns[j]]
             _runs(p, para, size, color, bold)
-        _cell_borders(c, fill=fill, bottom=bottom)
+            # An empty cell otherwise takes PowerPoint's 18 pt default and
+            # stretches its row.
+            p._p.get_or_add_endParaRPr().set("sz", str(round(size * 100)))
+        _cell_borders(c, fill=CARD if j == shade else None, bottom=bottom)
+
+    def section(i, text):
+        cell(i, 0, text, bold=True, color=MUTED, size=10, bottom=None)
+        for j in range(1, len(head)):
+            cell(i, j, "", size=10, bottom=None)
+        tbl.cell(i, 0).merge(tbl.cell(i, shade - 1))
 
     for j, h in enumerate(head):
-        cell(0, j, h, bold=True, align="l" if j < 3 else "c",
-             fill=CARD if j == 5 else None, bottom=(INK, 1.0))
+        cell(0, j, h, bold=True, bottom=(INK, 1.0))
+    return cell, section
+
+
+def stats_table(s, N: Numbers, top: float) -> None:
+    """The bracketed comparisons among all pairs of the five groups."""
+    V6, N6, V24, N24, UN = "6 h Vehicle", "6 h NM72", "24 h Vehicle", "24 h NM72", "Uninjured"
+
+    def means(pop, a, b):
+        ma, mb = N.mean(pop, a), N.mean(pop, b)
+        return f"{ma:,.0f} vs {mb:,.0f}" if ma > 100 else f"{ma:.2f} vs {mb:.2f}"
+
+    rows = [("section", "Vehicle vs NM72, among all pairwise comparisons")]
+    for pop, label in READOUTS:
+        for tp in ("6 h", "24 h"):
+            rows.append((label, f"{tp}: vehicle vs NM72", pop, f"{tp} Vehicle", f"{tp} NM72"))
+    rows.append(("section", "Injury and recovery"))
+    label = dict(READOUTS)
+    for pop, a, b, text in [
+            ("B-1a (IgM+)", UN, V24, "Uninjured vs 24 h vehicle"),
+            ("Neutrophils", UN, V6, "Uninjured vs 6 h vehicle"),
+            ("Neutrophils", UN, N6, "Uninjured vs 6 h NM72"),
+            ("Neutrophils", V6, V24, "6 h vs 24 h, vehicle"),
+            ("Neutrophils", N6, N24, "6 h vs 24 h, NM72")]:
+        rows.append((label[pop], text, pop, a, b))
+
+    head = ["Readout", "Comparison", "Means", "Welch t\n(uncorrected)", "Tukey",
+            "Dunnett's T3\n(default)"]
+    cell, section = _table(s, "Statistics table", head, [1.75, 2.85, 2.1, 1.8, 1.8, 1.8],
+                           "lllccc", len(rows), top, shade=5)
     for i, row in enumerate(rows, start=1):
         if row[0] == "section":
-            cell(i, 0, row[1], bold=True, color=MUTED, size=10)
-            for j in range(1, len(head)):
-                cell(i, j, "", size=10, fill=CARD if j == 5 else None)
-            tbl.cell(i, 0).merge(tbl.cell(i, 4))
+            section(i, row[1])
             continue
         label, text, pop, a, b = row
         ps = [N.p(pop, a, b, col) for col in ("welch_p", "tukey_p", "dunnett_t3_p")]
-        cell(i, 0, label, bottom=(RULE, 0.5))
-        cell(i, 1, text, color=TEXT2, bottom=(RULE, 0.5))
-        cell(i, 2, means(pop, a, b), color=TEXT2, bottom=(RULE, 0.5))
+        cell(i, 0, label)
+        cell(i, 1, text, color=TEXT2)
+        cell(i, 2, means(pop, a, b), color=TEXT2)
         for j, pv in enumerate(ps, start=3):
-            txt = "< 0.001" if pv < 0.001 else f"{pv:.3f}"
-            cell(i, j, txt, bold=pv < 0.05, color=INK if pv < 0.05 else TEXT2, align="c",
-                 fill=CARD if j == 5 else None, bottom=(RULE, 0.5))
+            cell(i, j, _fmt(pv), bold=pv < 0.05, color=INK if pv < 0.05 else TEXT2)
+
+
+WITHIN_ROWS = 1 + 2 * len(READOUTS)
+
+
+def within_table(s, N: Numbers, top: float) -> None:
+    """Vehicle vs NM72 within each timepoint: the drug brackets on every panel."""
+    head = ["Readout", "Timepoint", "Vehicle\nmean (n)", "NM72\nmean (n)", "Change",
+            "Welch t\n(uncorrected)", "Welch t\n+ Šidák", "Two-way ANOVA\n+ Šidák (default)"]
+    cell, section = _table(s, "Within-timepoint table", head,
+                           [1.75, 1.05, 1.45, 1.45, 1.0, 1.55, 1.55, 1.95], "llcccccc",
+                           WITHIN_ROWS, top, shade=7)
+
+    def mean_n(pop, g):
+        m = N.mean(pop, g)
+        return (f"{m:,.0f}" if m > 100 else f"{m:.2f}") + f" ({N.n(pop, g)})"
+
+    section(1, "Vehicle vs NM72 within each timepoint")
+    i = 2
+    for pop, label in READOUTS:
+        for tp in ("6 h", "24 h"):
+            r = N.w(pop, tp)
+            # One rule per readout, under its 24 h row, so the two timepoints read as a pair.
+            rule = (RULE, 0.5) if tp == "24 h" else None
+            ch = N.change(pop, tp)
+            cell(i, 0, label if tp == "6 h" else "", bottom=rule)
+            cell(i, 1, tp, color=TEXT2, bottom=rule)
+            cell(i, 2, mean_n(pop, f"{tp} Vehicle"), color=TEXT2, bottom=rule)
+            cell(i, 3, mean_n(pop, f"{tp} NM72"), color=TEXT2, bottom=rule)
+            cell(i, 4, f"{'+' if ch >= 0 else '−'}{abs(ch):.0f}%", color=TEXT2, bottom=rule)
+            for j, col in enumerate(("welch_p", "welch_sidak_p", "anova_sidak_p"), start=5):
+                pv = r[col]
+                cell(i, j, _fmt(pv), bold=pv < 0.05, color=INK if pv < 0.05 else TEXT2,
+                     bottom=rule)
+            i += 1
 
 
 # ---------------------------------------------------------------------------
@@ -354,9 +399,6 @@ def stats_table(s, N: Numbers, top: float) -> None:
 def build() -> Presentation:
     N = Numbers()
     long, res = N.long, N.res
-    V6, N6, V24, N24, UN = "6 h Vehicle", "6 h NM72", "24 h Vehicle", "24 h NM72", "Uninjured"
-    NEU, B1A, TREG, CD25, MER = "Neutrophils", "B-1a (IgM+)", "Tregs", "CD25+CD127-", \
-        "MerTK Median (M1 Like)"
     names = {L: f"{L}: {sf.markup(lab).replace('^{', '').replace('}', '')}"
              for L, (lab, _p, _y, _b) in sf.BY_LETTER.items()}
 
@@ -364,9 +406,10 @@ def build() -> Presentation:
     prs.slide_width, prs.slide_height = Inches(W), Inches(H)
     blank = prs.slide_layouts[6]
 
-    def slide(notes: str):
+    def slide(notes: str = ""):
         s = prs.slides.add_slide(blank)
-        s.notes_slide.notes_text_frame.text = notes.strip()
+        if notes:
+            s.notes_slide.notes_text_frame.text = notes.strip()
         return s
 
     def panels(s, letters, size, k, gap):
@@ -380,65 +423,18 @@ def build() -> Presentation:
             r, c = divmod(i, cols)
             add_panel(s, p, x0 + c * (pw + gap), y0 + r * (ph + gap), k, names[L])
 
-    t3 = "Mean ± SEM, each dot one animal. Welch ANOVA + Dunnett's T3 across all five groups; " \
-         "brackets show adjusted p, grey where p ≥ 0.05."
-    lo, hi = N.leave_one_out(B1A, "24 h")
-    mlo, mhi = N.welch_ci(MER, "24 h")
-
-    s = slide(f"""
-{t3}
-A-B: B cell panel. C-F: T cell / myeloid panel. 489 and 497 excluded on live-leukocyte yield.
-CD3 and CD4 frequencies are left out: they track sample viability (Spearman 0.74 for CD4),
-which differs between the 6 h groups. The readouts shown do not (|rho| < 0.42).
-""")
+    # One paragraph per line, as the notes pane shows them.
+    s = slide("Mean ± SEM, each dot one animal. Vehicle vs NM72 within each timepoint: "
+              f"{fp.WITHIN_METHOD}. Other brackets: Welch ANOVA + Dunnett's T3 across all five "
+              "groups. Brackets show adjusted p, grey where p ≥ 0.05.\n"
+              "A-B: B cell panel. C-F: T cell / myeloid panel.")
     panels(s, "ABCDEF", *SUMMARY, gap=0.0)
-
-    s = slide(f"""
-Neutrophils rise {N.mean(NEU, V6) / N.mean(NEU, UN):.1f}x uninjured at 6 h in vehicle
-({N.mean(NEU, V6):.2f}% vs {N.mean(NEU, UN):.2f}% of live leukocytes) and are back to
-baseline by 24 h. The 6 h -> 24 h fall is {fmt_p(N.p(NEU, V6, V24))} in vehicle after
-correction, {fmt_p(N.p(NEU, N6, N24))} in the NM72 arm.
-NM72 vs vehicle at 6 h: {N.change(NEU, '6 h'):+.0f}%, {fmt_p(N.p(NEU, V6, N6, 'welch_p'))}
-uncorrected, {N.p(NEU, V6, N6):.3f} corrected.
-Uninjured is n = {N.n(NEU, UN)}, so the rise itself does not survive correction.
-Animal 483's CD3 gate was tightened after first analysis (its neutrophils 3.87% -> 5.67%),
-which moved the uncorrected 6 h drug p from 0.26 to 0.048.
-""")
-    panels(s, "C", *SINGLE, gap=0.0)
-
-    s = slide(f"""
-B-1a at 24 h: vehicle {N.mean(B1A, V24):.2f}% of B cells, NM72 {N.mean(B1A, N24):.2f}%,
-uninjured {N.mean(B1A, UN):.2f}%. Vehicle vs NM72 at 24 h: {fmt_p(N.p(B1A, V24, N24, 'welch_p'))}
-uncorrected, {N.p(B1A, V24, N24):.3f} corrected. The IgM-negative fraction of the same gate
-does not move in any group, so the B-1a shift is not a gate artifact.
-Vehicle at 24 h is n = {N.n(B1A, V24)} (489 excluded); dropping any one animal moves the
-uncorrected p between {lo:.3f} and {hi:.3f}.
-""")
-    panels(s, "AB", *PAIR, gap=0.15)
-
-    s = slide(f"""
-Tregs, NM72 vs vehicle: {N.change(TREG, '6 h'):+.0f}% at 6 h
-({fmt_p(N.p(TREG, V6, N6, 'welch_p'))} uncorrected), {N.change(TREG, '24 h'):+.0f}% at 24 h
-({fmt_p(N.p(TREG, V24, N24, 'welch_p'))}). CD25+CD127- moves the same way. No comparison
-reaches corrected p < 0.05. Uninjured Tregs are n = {N.n(TREG, UN)} (497 excluded, 498 below
-the 20-event floor), so there is no baseline.
-""")
-    panels(s, "DE", *PAIR, gap=0.15)
-
-    s = slide(f"""
-MerTK median fluorescence on M1-like red pulp macrophages. NM72 vs vehicle at 24 h:
-{N.change(MER, '24 h'):+.1f}%, 95% CI {mlo:+.0f}% to {mhi:+.0f}%, so an effect larger than
-about 20% is unlikely. At 6 h the vehicle animals spread widely and the interval is wide.
-""")
-    panels(s, "F", *SINGLE, gap=0.0)
-
-    s = slide("""
-Bold: p < 0.05. Dunnett's T3 is the default because it does not assume equal SDs
-(Brown-Forsythe p = 0.048 for MerTK). Tukey pools the SD, which makes comparisons against
-the n = 2 uninjured group look stronger. All three agree that no vehicle-vs-NM72
-comparison survives correction. All 56 pairwise p-values: final/posthoc_all_methods.csv.
-""")
-    stats_table(s, N, top=(H - (0.46 + 0.228 * 19)) / 2)
+    panels(slide(), "C", *SINGLE, gap=0.0)
+    panels(slide(), "AB", *PAIR, gap=0.15)
+    panels(slide(), "DE", *PAIR, gap=0.15)
+    panels(slide(), "F", *SINGLE, gap=0.0)
+    stats_table(slide(), N, top=(H - table_height(19)) / 2)
+    within_table(slide(), N, top=(H - table_height(WITHIN_ROWS)) / 2)
     return prs
 
 
