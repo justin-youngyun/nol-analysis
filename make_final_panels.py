@@ -39,6 +39,7 @@ PANELS = [
     # only the vehicle one would imply the drug arm was not elevated.
     ("Neutrophils", "Neutrophils", "% of live leukocytes",
      [("Uninjured", "6 h Vehicle"), ("Uninjured", "6 h NM72"),
+      ("6 h Vehicle", "6 h NM72"),
       ("6 h Vehicle", "24 h Vehicle"), ("6 h NM72", "24 h NM72")]),
     ("Tregs", "Tregs", "% of CD4$^+$", []),
     ("CD25$^+$CD127$^-$", "CD25+CD127-", "% of CD4$^+$", []),
@@ -173,13 +174,17 @@ def main(argv=None) -> int:
     fig.suptitle("Splenic immune response to SCI, and the effect of NM72",
                  fontsize=14, fontweight="bold", color=c["text"], x=0.038, ha="left", y=0.995)
     fig.text(0.038, 0.012,
-             "Mean ± SEM, every animal shown. Welch's t-test, exact p, uncorrected; only C survives "
-             "FDR across the full 121-comparison screen.  ·  489 and 497 excluded on live-leukocyte yield.\n"
+             "Mean ± SEM, every animal shown. Welch's t-test, exact p, uncorrected; only the 6 h to 24 h "
+             "contrasts in C survive FDR across the 121-comparison screen.  ·  489 and 497 excluded on "
+             "live-leukocyte yield.\n"
+             "C: animal 483's CD3 gate was tightened after initial analysis (its neutrophils 3.87% to 5.67%); "
+             "with the original gate, 6 h vehicle vs NM72 is p = 0.26. Mann-Whitney p = 0.11, exact "
+             "permutation p = 0.09.\n"
              "CD3 and CD4 frequencies are omitted: those track the acquisition-quality gradient "
              "(Spearman 0.74, p=0.001) and cannot be separated from it at 6 h. D-F do not "
              "(|rho| < 0.41, p > 0.12), so they are shown.",
              fontsize=8.5, color=c["text_muted"], ha="left")
-    fig.tight_layout(rect=[0.01, 0.055, 1, 0.925], h_pad=3.6, w_pad=3.2)
+    fig.tight_layout(rect=[0.01, 0.075, 1, 0.925], h_pad=3.6, w_pad=3.2)
     out = outdir / "NM72_summary_panels.png"
     fig.savefig(out, bbox_inches="tight", facecolor=c["surface"], dpi=300)
     fig.savefig(out.with_suffix(".pdf"), bbox_inches="tight", facecolor=c["surface"])
