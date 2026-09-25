@@ -93,10 +93,15 @@ def _p(res: dict, a: str, b: str, col: str) -> float:
     return np.nan
 
 
+# Labels on the lines that slide_figures.py lifts out as editable PowerPoint lines.
+# Underscored, so no legend picks them up.
+BRACKET, TIMEPOINT = "_bracket", "_timepoint"
+
+
 def _bracket(ax, x1, x2, y, text, color, drop=0.02):
     h = ax.get_ylim()[1] * drop
     ax.plot([x1, x1, x2, x2], [y, y + h, y + h, y], color=color, linewidth=1.0,
-            clip_on=False, zorder=6)
+            clip_on=False, zorder=6, label=BRACKET)
     ax.text((x1 + x2) / 2, y + h * 1.15, text, ha="center", va="bottom", fontsize=8.5,
             color=color, zorder=6)
 
@@ -163,7 +168,7 @@ def draw(ax, long: pd.DataFrame, res: dict, label: str, pop: str, ylab: str,
                     y = py + step
             placed.append((x1, x2, y, pv))
         span = max([top] + [y + ymax * 0.16 for _x1, _x2, y, _pv in placed])
-        need = 15.0 * span / axes_pt
+        need = 17.0 * span / axes_pt
         if need <= step * 1.001:
             break
         step = need
@@ -200,7 +205,7 @@ def draw(ax, long: pd.DataFrame, res: dict, label: str, pop: str, ylab: str,
                                     units="points")
     for tp, (lo, hi) in sc.BRACKETS.items():
         ax.plot([lo, hi], [0, 0], transform=under, color=c["text_muted"], linewidth=0.9,
-                clip_on=False)
+                clip_on=False, label=TIMEPOINT)
         ax.text((lo + hi) / 2, 0, tp, ha="center", va="top", transform=below,
                 fontsize=9.5, color=c["text_secondary"])
     ax.set_title(label, fontsize=11, fontweight="bold", color=c["text"], loc="left", pad=8)

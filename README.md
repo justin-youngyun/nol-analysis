@@ -163,26 +163,27 @@ name Arial first, so the layout holds on a machine that draws them in Arial.
 
 ## Slide deck
 
-`make_slides.py` builds the deck for presenting the cohort, nine slides and four
-backups, as `outputs/slides/NM72_spleen_flow.pptx`:
+`make_slides.py` builds `outputs/slides/NM72_spleen_flow.pptx`, which holds the
+plots and nothing else. It has all six panels on one slide, then neutrophils (C),
+B-1a with its IgM⁻ control (A–B), Tregs with CD25⁺CD127⁻ (D–E) and MerTK (F), and
+a table of every planned comparison under uncorrected Welch, Tukey and
+Dunnett's T3.
 
 ```
 python3 make_slides.py
 ```
 
-It redraws its figures first (`slide_figures.py`). They are the summary
-figure's panels, split into ones and twos and sized so the text is readable when
-projected. Titles, callouts and footnotes are live text, and the statistics
-table is a native PowerPoint table. Each figure is stored the way PowerPoint
-stores an inserted SVG, as a PNG with the SVG embedded behind it. PowerPoint 365
-draws the SVG, and right-click → Convert to Shape makes every label, point and
-bracket editable. Older versions show the PNG.
+Each panel is one PowerPoint group, so it moves and resizes as a unit. Inside
+it, only the points, error bars, band and grid are a picture. Every title, axis
+label, tick label, n=, p-value and note is a native text box, and every bracket
+and timepoint line is a native line, so all of them can be edited directly.
+The picture carries its SVG as well, so in PowerPoint 365 right-click →
+Convert to Shape makes the points editable too.
 
-Every number in the slide text is computed from the data at build time. The
-build also asserts each claim the text makes: the 6 h → 24 h neutrophil fall
-survives T3, and no vehicle-vs-NM72 contrast does. If a re-analysis changes one
-of those, the build stops rather than leaving a stale slide. Speaker notes hold
-the caveats a reviewer is likely to ask about.
+`slide_figures.py` draws each panel with the summary figure's own `draw()`,
+records where matplotlib put every text and bracket, and removes them from the
+image. `make_slides.py` then rebuilds them in place at the slide's scale. The
+speaker notes carry the numbers and caveats that used to be on the slides.
 
 It needs `python-pptx` and `lxml` in addition to `requirements.txt`.
 
@@ -196,7 +197,7 @@ It needs `python-pptx` and `lxml` in addition to `requirements.txt`.
 - `sci_cohorts.py`: the cohort split, palette, group-scatter panel and editable figure export the flow scripts share
 - `posthoc.py`: Tukey, Games-Howell and Dunnett's T3 for the five-group design
 - `make_final_panels.py`: the six-panel presentation figure
-- `slide_figures.py`: the summary panels cut and sized for slides, and the two QC backup figures
-- `make_slides.py`: the PowerPoint deck
+- `slide_figures.py`: draws each panel and lifts its text and lines out for the deck
+- `make_slides.py`: the PowerPoint deck, plots only, every label editable
 
 MIT licensed.
